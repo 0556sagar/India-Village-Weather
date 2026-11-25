@@ -2,6 +2,8 @@ package com.example.indiavillageweather
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -20,6 +22,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.lifecycleScope
@@ -93,7 +96,6 @@ class MainActivity : AppCompatActivity() {
             checkLocationPermissionAndFetch()
         }
 
-        // Load New Delhi, Delhi on startup
         fetchWeatherForVillage(defaultLocation)
     }
 
@@ -101,7 +103,8 @@ class MainActivity : AppCompatActivity() {
         val permissionsToRequest = mutableListOf<String>()
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) {
             permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
             permissionsToRequest.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
@@ -131,7 +134,6 @@ class MainActivity : AppCompatActivity() {
 
         val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
-        // Check if device GPS / Location toggle is enabled
         if (!LocationManagerCompat.isLocationEnabled(locationManager)) {
             Toast.makeText(this, "Please turn on device Location / GPS", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
@@ -141,14 +143,17 @@ class MainActivity : AppCompatActivity() {
         progressBar.visibility = View.VISIBLE
 
         try {
-            // Try getting the best recent cached location first
             val gpsLocation = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            } else null
+            } else {
+                null
+            }
 
             val networkLocation = if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            } else null
+            } else {
+                null
+            }
 
             val bestLastLocation = when {
                 gpsLocation != null && networkLocation != null ->
@@ -157,13 +162,11 @@ class MainActivity : AppCompatActivity() {
                 else -> networkLocation
             }
 
-            // If cached location is recent (within last 2 minutes), use it immediately
             if (bestLastLocation != null && (System.currentTimeMillis() - bestLastLocation.time) < 2 * 60 * 1000) {
                 fetchWeatherByCoords(bestLastLocation.latitude, bestLastLocation.longitude, null)
                 return
             }
 
-            // Otherwise, request a fresh live location fix
             requestFreshLocation(locationManager, bestLastLocation)
 
         } catch (e: Exception) {
@@ -175,7 +178,6 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun requestFreshLocation(locationManager: LocationManager, fallbackLocation: Location?) {
-        // Cancel any previous listener
         activeLocationListener?.let { locationManager.removeUpdates(it) }
         locationTimeoutJob?.cancel()
 
@@ -200,7 +202,6 @@ class MainActivity : AppCompatActivity() {
             locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, listener, Looper.getMainLooper())
         }
 
-        // Timeout after 10 seconds if live fix fails
         locationTimeoutJob = lifecycleScope.launch {
             delay(10_000L)
             locationManager.removeUpdates(listener)
@@ -233,3 +234,6 @@ class MainActivity : AppCompatActivity() {
                     if (response.isSuccessful && responseBody != null) {
                         val jsonArray = JSONArray(responseBody)
                         if (jsonArray.length() > 0) {
+                            val firstResult = jsonArray.getJSONObject(0)
+                            val lat = firstResult.getDouble("lat")
+                            val lon = firstResult.getDouble("lon")
