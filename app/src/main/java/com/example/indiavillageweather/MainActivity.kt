@@ -15,22 +15,14 @@ import android.os.Bundle
 import android.os.Looper
 import android.provider.Settings
 import android.view.View
-import android.widget.Button
-import android.widget.EditText
-import android.widget.ProgressBar
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -60,13 +52,12 @@ class MainActivity : AppCompatActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
-        val coarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
-
-        if (fineLocationGranted || coarseLocationGranted) {
+        val fine = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val coarse = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+        if (fine || coarse) {
             fetchDeviceLocationWeather()
         } else {
-            Toast.makeText(this, "Location permission denied. Showing $defaultLocation weather.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Location denied. Showing $defaultLocation", Toast.LENGTH_SHORT).show()
             fetchWeatherForVillage(defaultLocation)
         }
     }
@@ -85,133 +76,95 @@ class MainActivity : AppCompatActivity() {
 
         btnSearch.setOnClickListener {
             val query = etSearch.text.toString().trim()
-            if (query.isNotEmpty()) {
-                fetchWeatherForVillage(query)
-            } else {
-                Toast.makeText(this, "Please enter a village or city name", Toast.LENGTH_SHORT).show()
-            }
+            if (query.isNotEmpty()) fetchWeatherForVillage(query)
+            else Toast.makeText(this, "Enter village or city name", Toast.LENGTH_SHORT).show()
         }
 
-        btnLocation.setOnClickListener {
-            checkLocationPermissionAndFetch()
-        }
-
+        btnLocation.setOnClickListener { checkLocationPermissionAndFetch() }
         fetchWeatherForVillage(defaultLocation)
     }
 
     private fun checkLocationPermissionAndFetch() {
-        val permissionsToRequest = mutableListOf<String>()
-
+        val perms = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
         ) {
-            permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
-            permissionsToRequest.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            perms.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            perms.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS)
         }
-
-        if (permissionsToRequest.isNotEmpty()) {
-            requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
-        } else {
-            fetchDeviceLocationWeather()
-        }
+        if (perms.isNotEmpty()) requestPermissionLauncher.launch(perms.toTypedArray())
+        else fetchDeviceLocationWeather()
     }
 
     @SuppressLint("MissingPermission")
     private fun fetchDeviceLocationWeather() {
         val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
         if (!hasFine && !hasCoarse) {
             fetchWeatherForVillage(defaultLocation)
             return
         }
-
-        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-
-        if (!LocationManagerCompat.isLocationEnabled(locationManager)) {
+        val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        if (!LocationManagerCompat.isLocationEnabled(lm)) {
             Toast.makeText(this, "Please turn on device Location / GPS", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
             return
         }
-
         progressBar.visibility = View.VISIBLE
-
         try {
-            val gpsLocation = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            } else {
-                null
+            val gps = if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null
+            val net = if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) else null
+            val best = when {
+                gps != null && net != null -> if (gps.time > net.time) gps else net
+                gps != null -> gps
+                else -> net
             }
-
-            val networkLocation = if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            } else {
-                null
-            }
-
-            val bestLastLocation = when {
-                gpsLocation != null && networkLocation != null ->
-                    if (gpsLocation.time > networkLocation.time) gpsLocation else networkLocation
-                gpsLocation != null -> gpsLocation
-                else -> networkLocation
-            }
-
-            if (bestLastLocation != null && (System.currentTimeMillis() - bestLastLocation.time) < 2 * 60 * 1000) {
-                fetchWeatherByCoords(bestLastLocation.latitude, bestLastLocation.longitude, null)
+            if (best != null && (System.currentTimeMillis() - best.time) < 120_000L) {
+                fetchWeatherByCoords(best.latitude, best.longitude, null)
                 return
             }
-
-            requestFreshLocation(locationManager, bestLastLocation)
-
+            requestFreshLocation(lm, best)
         } catch (e: Exception) {
-            e.printStackTrace()
             progressBar.visibility = View.GONE
             fetchWeatherForVillage(defaultLocation)
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun requestFreshLocation(locationManager: LocationManager, fallbackLocation: Location?) {
-        activeLocationListener?.let { locationManager.removeUpdates(it) }
+    private fun requestFreshLocation(lm: LocationManager, fallback: Location?) {
+        activeLocationListener?.let { lm.removeUpdates(it) }
         locationTimeoutJob?.cancel()
-
         val listener = object : LocationListener {
-            override fun onLocationChanged(location: Location) {
+            override fun onLocationChanged(loc: Location) {
                 locationTimeoutJob?.cancel()
-                locationManager.removeUpdates(this)
+                lm.removeUpdates(this)
                 activeLocationListener = null
-                fetchWeatherByCoords(location.latitude, location.longitude, null)
+                fetchWeatherByCoords(loc.latitude, loc.longitude, null)
             }
-
             override fun onProviderDisabled(provider: String) {}
             override fun onProviderEnabled(provider: String) {}
         }
-
         activeLocationListener = listener
-
-        if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-            locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0L, 0f, listener, Looper.getMainLooper())
+        if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0L, 0f, listener, Looper.getMainLooper())
         }
-        if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, listener, Looper.getMainLooper())
+        if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, listener, Looper.getMainLooper())
         }
-
         locationTimeoutJob = lifecycleScope.launch {
             delay(10_000L)
-            locationManager.removeUpdates(listener)
+            lm.removeUpdates(listener)
             activeLocationListener = null
-
-            if (fallbackLocation != null) {
-                fetchWeatherByCoords(fallbackLocation.latitude, fallbackLocation.longitude, null)
+            if (fallback != null) {
+                fetchWeatherByCoords(fallback.latitude, fallback.longitude, null)
             } else {
                 progressBar.visibility = View.GONE
-                Toast.makeText(this@MainActivity, "Live location timeout. Showing $defaultLocation", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "GPS timeout. Showing $defaultLocation", Toast.LENGTH_SHORT).show()
                 fetchWeatherForVillage(defaultLocation)
             }
         }
@@ -221,19 +174,42 @@ class MainActivity : AppCompatActivity() {
         progressBar.visibility = View.VISIBLE
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val encodedQuery = URLEncoder.encode(query, "UTF-8")
-                val geocodeUrl = "https://openstreetmap.org"
+                val encoded = URLEncoder.encode(query, "UTF-8")
+                val url = "https://openstreetmap.org"
+                val req = Request.Builder().url(url).header("User-Agent", "IndiaVillageWeather/1.0").build()
+                client.newCall(req).execute().use { res ->
+                    val body = res.body?.string()
+                    if (res.isSuccessful && body != null) {
+                        val arr = JSONArray(body)
+                        if (arr.length() > 0) {
+                            val obj = arr.getJSONObject(0)
+                            val name = obj.optString("display_name", query).split(",").take(2).joinToString(",").trim()
+                            fetchWeatherByCoordsIO(obj.getDouble("lat"), obj.getDouble("lon"), name)
+                        } else showError("Location not found: $query")
+                    } else showError("Search service unavailable")
+                }
+            } catch (e: Exception) {
+                showError("Error fetching location")
+            }
+        }
+    }
 
-                val request = Request.Builder()
-                    .url(geocodeUrl)
-                    .header("User-Agent", "IndiaVillageWeather/1.0 (com.example.indiavillageweather)")
-                    .build()
+    private fun fetchWeatherByCoords(lat: Double, lon: Double, title: String?) {
+        progressBar.visibility = View.VISIBLE
+        lifecycleScope.launch(Dispatchers.IO) {
+            fetchWeatherByCoordsIO(lat, lon, title ?: reverseGeocode(lat, lon))
+        }
+    }
 
-                client.newCall(request).execute().use { response ->
-                    val responseBody = response.body?.string()
-                    if (response.isSuccessful && responseBody != null) {
-                        val jsonArray = JSONArray(responseBody)
-                        if (jsonArray.length() > 0) {
-                            val firstResult = jsonArray.getJSONObject(0)
-                            val lat = firstResult.getDouble("lat")
-                            val lon = firstResult.getDouble("lon")
+    private fun reverseGeocode(lat: Double, lon: Double): String {
+        return try {
+            val url = "https://openstreetmap.org"
+            val req = Request.Builder().url(url).header("User-Agent", "IndiaVillageWeather/1.0").build()
+            client.newCall(req).execute().use { res ->
+                val body = res.body?.string()
+                if (res.isSuccessful && body != null) {
+                    val json = JSONObject(body)
+                    val addr = json.optJSONObject("address")
+                    val place = addr?.optString("village")?.ifEmpty { addr.optString("suburb") }
+                        ?.ifEmpty { addr.optString("town") }?.ifEmpty { addr.optString("city") }
+                        ?.ifEmpty { addr.optString("county") }
