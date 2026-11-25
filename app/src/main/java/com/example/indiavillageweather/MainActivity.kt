@@ -131,7 +131,8 @@ class MainActivity : AppCompatActivity() {
         progressBar.visibility = View.VISIBLE
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val url = "https://openstreetmap.org{URLEncoder.encode(query, "UTF-8")}&countrycodes=in&limit=1"
+                val encoded = URLEncoder.encode(query, "UTF-8")
+                val url = "https://openstreetmap.org"
                 val req = Request.Builder().url(url).header("User-Agent", "IndiaVillageWeather/1.0").build()
                 client.newCall(req).execute().use { res ->
                     val arr = JSONArray(res.body?.string() ?: "[]")
@@ -186,5 +187,3 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun showErr(m: String) = withContext(Dispatchers.Main) { progressBar.visibility = View.GONE; toast(m) }
-    private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
-
