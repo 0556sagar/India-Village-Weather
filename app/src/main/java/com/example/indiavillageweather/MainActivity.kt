@@ -1,214 +1,283 @@
-package com.vinpex.weather
+package com.example.indiavillageweather
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.draw.*
-import androidx.compose.ui.graphics.*
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
+import android.os.Looper
+import android.widget.Button
+import android.widget.EditText
+import android.widget.ProgressBar
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
 import java.net.URLEncoder
-import java.net.URL
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
+
+    companion object {
+        private const val DEFAULT_VILLAGE = "Bhanda, Udaipur, Rajasthan"
+        private const val DEFAULT_VILLAGE_SHORT = "Bhanda, Udaipur"
+        private const val DEFAULT_LAT = 23.95
+        private const val DEFAULT_LON = 73.68
+    }
+
+    private lateinit var etSearch: EditText
+    private lateinit var btnSearch: Button
+    private lateinit var btnLocation: Button
+    private lateinit var tvLocation: TextView
+    private lateinit var tvTemperature: TextView
+    private lateinit var tvWeather: TextView
+    private lateinit var progressBar: ProgressBar
+
+    private val client = OkHttpClient()
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val coarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+
+        if (fineLocationGranted || coarseLocationGranted) {
+            fetchDeviceLocationWeather()
+        } else {
+            loadDefaultVillageWeather()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { WeatherScreen() } }
-    }
-}
+        setContentView(R.layout.activity_main)
 
-data class Place(
-    val name: String,
-    val admin: String,
-    val latitude: Double,
-    val longitude: Double,
-    val pincode: String = ""
-)
+        etSearch = findViewById(R.id.etSearch)
+        btnSearch = findViewById(R.id.btnSearch)
+        btnLocation = findViewById(R.id.btnLocation)
+        tvLocation = findViewById(R.id.tvLocation)
+        tvTemperature = findViewById(R.id.tvTemperature)
+        tvWeather = findViewById(R.id.tvWeather)
+        progressBar = findViewById(R.id.progressBar)
 
-@Composable
-fun WeatherScreen() {
-    var query by remember { mutableStateOf("") }
-    var places by remember { mutableStateOf<List<Place>>(emptyList()) }
-    var weather by remember { mutableStateOf("Search a village, post office, PIN code, town or city to see its forecast.") }
-    var busy by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val transition = rememberInfiniteTransition(label = "weatherGlow")
-    val glow by transition.animateFloat(
-        initialValue = 0.18f, targetValue = 0.34f,
-        animationSpec = infiniteRepeatable(tween(4200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "glow"
-    )
-    val glass = Color.White.copy(alpha = 0.105f)
-    val border = Color.White.copy(alpha = 0.18f)
-
-    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF172A46), Color(0xFF46536A), Color(0xFF252B3A))))) {
-        Box(Modifier.align(Alignment.TopEnd).size(290.dp).offset(x = 100.dp, y = (-65).dp).background(Color(0xFF9AB9D9).copy(alpha = glow), CircleShape))
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 18.dp)) {
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("＋", color = Color.White, style = MaterialTheme.typography.headlineLarge)
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Vinpex Weather", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("India · Village weather", color = Color.White.copy(alpha = .68f), style = MaterialTheme.typography.labelMedium)
-                }
-                Text("⋮", color = Color.White, style = MaterialTheme.typography.headlineLarge)
+        btnSearch.setOnClickListener {
+            val query = etSearch.text.toString().trim()
+            if (query.isNotEmpty()) {
+                fetchWeatherForVillage(query)
+            } else {
+                loadDefaultVillageWeather()
             }
-            Card(colors = CardDefaults.cardColors(containerColor = glass), border = BorderStroke(1.dp, border), shape = RoundedCornerShape(28.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        label = { Text("Village / post office / PIN code") }, placeholder = { Text("e.g. Sanganer or 302029") },
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color.White.copy(alpha = .65f), unfocusedBorderColor = border,
-                            focusedLabelColor = Color.White, unfocusedLabelColor = Color.White.copy(alpha = .72f),
-                            cursorColor = Color.White, focusedPlaceholderColor = Color.White.copy(alpha = .5f), unfocusedPlaceholderColor = Color.White.copy(alpha = .5f)))
-                    Button(onClick = {
-                        scope.launch {
-                            busy = true; places = emptyList()
-                            try {
-                                val found = searchPlaces(query.trim())
-                                places = found
-                                weather = if (found.isEmpty()) "No matching place found. Try post office + district or PIN code." else "Choose a location below to load its weather."
-                            } catch (_: Exception) { weather = "Search failed. Check your internet connection and try again." }
-                            busy = false
-                        }
-                    }, enabled = query.isNotBlank() && !busy, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = .2f), contentColor = Color.White)) {
-                        Text(if (busy) "Searching…" else "Search locations")
+        }
+
+        btnLocation.setOnClickListener {
+            checkLocationPermissionAndFetch()
+        }
+
+        // Start directly with default village Bhanda so launch never blocks on GPS
+        loadDefaultVillageWeather()
+    }
+
+    private fun loadDefaultVillageWeather() {
+        fetchWeatherForVillage(DEFAULT_VILLAGE, fallbackToDefaultCoords = true)
+    }
+
+    private fun checkLocationPermissionAndFetch() {
+        val permissionsToRequest = mutableListOf<String>()
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            permissionsToRequest.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
+        } else {
+            fetchDeviceLocationWeather()
+        }
+    }
+
+    private fun fetchDeviceLocationWeather() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            loadDefaultVillageWeather()
+            return
+        }
+
+        try {
+            val locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+            val gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            val networkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+
+            val cachedLocation: Location? =
+                (if (gpsEnabled) locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null)
+                    ?: (if (networkEnabled) locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) else null)
+
+            if (cachedLocation != null) {
+                fetchWeatherByCoords(cachedLocation.latitude, cachedLocation.longitude, "Current Location")
+                return
+            }
+
+            val provider = when {
+                networkEnabled -> LocationManager.NETWORK_PROVIDER
+                gpsEnabled -> LocationManager.GPS_PROVIDER
+                else -> null
+            }
+
+            if (provider != null) {
+                progressBar.visibility = View.VISIBLE
+                val singleUpdateListener = object : LocationListener {
+                    override fun onLocationChanged(location: Location) {
+                        locationManager.removeUpdates(this)
+                        fetchWeatherByCoords(location.latitude, location.longitude, "Current Location")
+                    }
+
+                    @Deprecated("Deprecated in Android")
+                    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+                    override fun onProviderEnabled(provider: String) {}
+                    override fun onProviderDisabled(provider: String) {
+                        locationManager.removeUpdates(this)
+                        loadDefaultVillageWeather()
+                    }
+                }
+                locationManager.requestSingleUpdate(provider, singleUpdateListener, Looper.getMainLooper())
+            } else {
+                loadDefaultVillageWeather()
+            }
+        } catch (_: Exception) {
+            loadDefaultVillageWeather()
+        }
+    }
+
+    private fun fetchWeatherForVillage(query: String, fallbackToDefaultCoords: Boolean = false) {
+        progressBar.visibility = View.VISIBLE
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val encodedQuery = URLEncoder.encode(query, "UTF-8")
+                val geocodeUrl = "https://nominatim.openstreetmap.org/search?format=json&q=$encodedQuery&countrycodes=in"
+
+                val request = Request.Builder()
+                    .url(geocodeUrl)
+                    .header("User-Agent", "IndiaVillageWeather/1.0 (com.example.indiavillageweather)")
+                    .build()
+
+                val response = client.newCall(request).execute()
+                val responseBody = response.body?.string()
+
+                if (response.isSuccessful && responseBody != null) {
+                    val jsonArray = JSONArray(responseBody)
+                    if (jsonArray.length() > 0) {
+                        val firstResult = jsonArray.getJSONObject(0)
+                        val lat = firstResult.getDouble("lat")
+                        val lon = firstResult.getDouble("lon")
+                        val displayName = firstResult.optString("display_name", query)
+                        val shortName = displayName.split(",").take(2).joinToString(",")
+                        fetchWeatherByCoordsIO(lat, lon, shortName)
+                        return@launch
+                    }
+                }
+
+                if (fallbackToDefaultCoords) {
+                    fetchWeatherByCoordsIO(DEFAULT_LAT, DEFAULT_LON, DEFAULT_VILLAGE_SHORT)
+                } else {
+                    withContext(Dispatchers.Main) {
+                        progressBar.visibility = View.GONE
+                        Toast.makeText(this@MainActivity, "Village not found: $query", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (_: Exception) {
+                if (fallbackToDefaultCoords) {
+                    fetchWeatherByCoordsIO(DEFAULT_LAT, DEFAULT_LON, DEFAULT_VILLAGE_SHORT)
+                } else {
+                    withContext(Dispatchers.Main) {
+                        progressBar.visibility = View.GONE
+                        Toast.makeText(this@MainActivity, "Error fetching location details", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
-            Spacer(Modifier.height(16.dp))
-            Text("WEATHER & FORECAST", color = Color.White.copy(alpha = .65f), style = MaterialTheme.typography.labelMedium, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(8.dp))
-            Card(colors = CardDefaults.cardColors(containerColor = glass), border = BorderStroke(1.dp, border), shape = RoundedCornerShape(28.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(18.dp)) {
-                    Text("Your selected location", color = Color.White.copy(alpha = .7f), style = MaterialTheme.typography.labelLarge)
-                    Spacer(Modifier.height(8.dp))
-                    Text(weather, color = Color.White, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+
+    private fun fetchWeatherByCoords(lat: Double, lon: Double, locationTitle: String) {
+        progressBar.visibility = View.VISIBLE
+        CoroutineScope(Dispatchers.IO).launch {
+            fetchWeatherByCoordsIO(lat, lon, locationTitle)
+        }
+    }
+
+    private suspend fun fetchWeatherByCoordsIO(lat: Double, lon: Double, locationTitle: String) {
+        try {
+            val weatherUrl = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current_weather=true"
+
+            val request = Request.Builder()
+                .url(weatherUrl)
+                .build()
+
+            val response = client.newCall(request).execute()
+            val responseBody = response.body?.string()
+
+            if (response.isSuccessful && responseBody != null) {
+                val jsonObject = JSONObject(responseBody)
+                val currentWeather = jsonObject.getJSONObject("current_weather")
+                val temp = currentWeather.getDouble("temperature")
+                val windSpeed = currentWeather.getDouble("windspeed")
+                val weatherCode = currentWeather.getInt("weathercode")
+
+                val weatherCondition = getWeatherConditionText(weatherCode)
+
+                withContext(Dispatchers.Main) {
+                    progressBar.visibility = View.GONE
+                    tvLocation.text = locationTitle
+                    tvTemperature.text = "$temp °C"
+                    tvWeather.text = "$weatherCondition | Wind: $windSpeed km/h"
+                }
+            } else if (lat != DEFAULT_LAT || lon != DEFAULT_LON) {
+                fetchWeatherByCoordsIO(DEFAULT_LAT, DEFAULT_LON, DEFAULT_VILLAGE_SHORT)
+            } else {
+                withContext(Dispatchers.Main) {
+                    progressBar.visibility = View.GONE
+                    Toast.makeText(this@MainActivity, "Error fetching weather data", Toast.LENGTH_SHORT).show()
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 18.dp)) {
-                items(places) { place ->
-                    Card(colors = CardDefaults.cardColors(containerColor = glass), border = BorderStroke(1.dp, border), shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth(), onClick = {
-                        scope.launch { busy = true; weather = try { fetchWeather(place) } catch (_: Exception) { "Weather unavailable. Check your connection and try again." }; busy = false }
-                    }) {
-                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(place.name, color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                Text(place.admin, color = Color.White.copy(alpha = .72f), style = MaterialTheme.typography.bodySmall)
-                                if (place.pincode.isNotBlank()) Text("PIN ${place.pincode}", color = Color.White.copy(alpha = .72f), style = MaterialTheme.typography.labelSmall)
-                            }
-                            Text("›", color = Color.White, style = MaterialTheme.typography.headlineMedium)
-                        }
-                    }
+        } catch (_: Exception) {
+            if (lat != DEFAULT_LAT || lon != DEFAULT_LON) {
+                fetchWeatherByCoordsIO(DEFAULT_LAT, DEFAULT_LON, DEFAULT_VILLAGE_SHORT)
+            } else {
+                withContext(Dispatchers.Main) {
+                    progressBar.visibility = View.GONE
+                    Toast.makeText(this@MainActivity, "Network error", Toast.LENGTH_SHORT).show()
                 }
             }
-            Text("Weather data · Open-Meteo   |   Post offices · India Post", color = Color.White.copy(alpha = .52f), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 10.dp).align(Alignment.CenterHorizontally))
         }
     }
-}
 
-/** India Post lookup first; Open-Meteo supplies coordinates for the returned locality. */
-private suspend fun searchPlaces(query: String): List<Place> = withContext(Dispatchers.IO) {
-    require(query.isNotBlank()) { "Search query is blank" }
-    val encoded = URLEncoder.encode(query, Charsets.UTF_8.name())
-    val postal = runCatching {
-        val root = JSONArray(httpGet("https://api.postalpincode.in/postoffice/$encoded"))
-        val first = root.optJSONObject(0)
-        if (first?.optString("Status") == "Success") first.optJSONArray("PostOffice") else null
-    }.getOrNull()
-
-    val postalPlaces = mutableListOf<Place>()
-    if (postal != null) {
-        for (i in 0 until postal.length()) {
-            val po = postal.optJSONObject(i) ?: continue
-            val office = po.optString("Name").trim()
-            val district = po.optString("District").trim()
-            val state = po.optString("State").trim()
-            val pin = po.optString("Pincode").trim()
-            if (office.isBlank() || district.isBlank()) continue
-            val geoQuery = URLEncoder.encode("$office $district $state", Charsets.UTF_8.name())
-            val geo = runCatching {
-                val result = JSONObject(httpGet("https://geocoding-api.open-meteo.com/v1/search?name=$geoQuery&count=10&language=en&format=json"))
-                    .optJSONArray("results")
-                (0 until (result?.length() ?: 0)).asSequence()
-                    .mapNotNull { result?.optJSONObject(it) }
-                    .firstOrNull { it.optString("country_code") == "IN" }
-            }.getOrNull() ?: continue
-            postalPlaces += Place(office, listOf(district, state, "India").filter(String::isNotBlank).distinct().joinToString(", "), geo.getDouble("latitude"), geo.getDouble("longitude"), pin)
+    private fun getWeatherConditionText(code: Int): String {
+        return when (code) {
+            0 -> "Clear Sky"
+            1, 2, 3 -> "Mainly Clear / Partly Cloudy"
+            45, 48 -> "Foggy"
+            51, 53, 55 -> "Drizzle"
+            61, 63, 65 -> "Rain"
+            71, 73, 75 -> "Snow"
+            80, 81, 82 -> "Rain Showers"
+            95, 96, 99 -> "Thunderstorm"
+            else -> "Weather Code $code"
         }
-    }
-    if (postalPlaces.isNotEmpty()) return@withContext postalPlaces.distinctBy { "${it.name}|${it.pincode}" }.take(30)
-
-    val root = JSONObject(httpGet("https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=30&language=en&format=json"))
-    val results = root.optJSONArray("results") ?: return@withContext emptyList()
-    (0 until results.length()).mapNotNull { i ->
-        val item = results.optJSONObject(i) ?: return@mapNotNull null
-        if (item.optString("country_code") != "IN") return@mapNotNull null
-        val name = item.optString("name").trim()
-        if (name.isBlank()) return@mapNotNull null
-        Place(name, listOf(item.optString("admin2"), item.optString("admin1"), "India").filter(String::isNotBlank).distinct().joinToString(", "), item.getDouble("latitude"), item.getDouble("longitude"))
-    }
-}
-
-private suspend fun fetchWeather(place: Place): String = withContext(Dispatchers.IO) {
-    val url = "https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=5&timezone=auto"
-    val root = JSONObject(httpGet(url))
-    val current = root.getJSONObject("current")
-    val daily = root.getJSONObject("daily")
-    val dates = daily.getJSONArray("time")
-    val highs = daily.getJSONArray("temperature_2m_max")
-    val lows = daily.getJSONArray("temperature_2m_min")
-    val rain = daily.optJSONArray("precipitation_probability_max")
-    buildString {
-        append("${place.name}\n")
-        append("${current.getDouble("temperature_2m")}°C · Feels like ${current.getDouble("apparent_temperature")}°C\n")
-        append("Humidity ${current.getInt("relative_humidity_2m")}% · Wind ${current.getDouble("wind_speed_10m")} km/h\n")
-        append("Rain now ${current.getDouble("precipitation")} mm\n\n5-day forecast\n")
-        for (i in 0 until dates.length()) {
-            append("${dates.getString(i)}: ${lows.getDouble(i)}° / ${highs.getDouble(i)}°C")
-            if (rain != null && !rain.isNull(i)) append(" · Rain chance ${rain.optInt(i)}%")
-            append("\n")
-        }
-    }
-}
-
-private fun httpGet(address: String): String {
-    val connection = (URL(address).openConnection() as HttpURLConnection).apply {
-        requestMethod = "GET"
-        connectTimeout = 12_000
-        readTimeout = 15_000
-        setRequestProperty("Accept", "application/json")
-        setRequestProperty("User-Agent", "VinpexWeather/1.0 (Android)")
-    }
-    return try {
-        val code = connection.responseCode
-        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-        val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-        if (code !in 200..299) throw IllegalStateException("HTTP $code")
-        body
-    } finally {
-        connection.disconnect()
     }
 }
