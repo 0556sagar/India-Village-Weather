@@ -1,76 +1,112 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://android.com"
+    xmlns:app="http://android.com"
+    xmlns:tools="http://android.com"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp"
-    android:gravity="center_horizontal">
+    android:background="#F0F4F8"
+    android:padding="20dp"
+    tools:context=".MainActivity">
 
-    <TextView
-        android:id="@+id/tvTitle"
+    <!-- Search Box -->
+    <EditText
+        android:id="@+id/etSearch"
+        android:layout_width="0dp"
+        android:layout_height="52dp"
+        android:layout_marginEnd="8dp"
+        android:background="@android:drawable/edit_text"
+        android:hint="Enter village or city (e.g. Kherwara)"
+        android:imeOptions="actionSearch"
+        android:inputType="textCapWords"
+        android:paddingHorizontal="14dp"
+        android:textSize="16sp"
+        app:layout_constraintEnd_toStartOf="@+id/btnSearch"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- Search Button -->
+    <Button
+        android:id="@+id/btnSearch"
         android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Bharat Village Weather"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="16dp" />
+        android:layout_height="52dp"
+        android:text="Search"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="12dp">
-
-        <EditText
-            android:id="@+id/etSearch"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="Enter village or city..."
-            android:inputType="text" />
-
-        <Button
-            android:id="@+id/btnSearch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Search" />
-    </LinearLayout>
-
+    <!-- Current Location Button -->
     <Button
         android:id="@+id/btnLocation"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Use Current Location"
-        android:layout_marginBottom="24dp" />
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="0dp"
+        android:layout_height="48dp"
+        android:layout_marginTop="12dp"
+        android:text="📍 Use Live / Current Location"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/etSearch" />
 
+    <!-- Weather Card -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/cardWeather"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        app:cardBackgroundColor="#FFFFFF"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="4dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/btnLocation">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:id="@+id/tvLocation"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="New Delhi, Delhi"
+                android:textColor="#1E293B"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvTemperature"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="--°C"
+                android:textColor="#0284C7"
+                android:textSize="54sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvWeather"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center"
+                android:lineSpacingExtra="6dp"
+                android:text="Loading weather..."
+                android:textColor="#475569"
+                android:textSize="16sp" />
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
+    <!-- Loading Indicator -->
     <ProgressBar
         android:id="@+id/progressBar"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:visibility="gone"
-        android:layout_marginBottom="16dp" />
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/cardWeather" />
 
-    <TextView
-        android:id="@+id/tvLocation"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="8dp" />
-
-    <TextView
-        android:id="@+id/tvTemperature"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textSize="36sp"
-        android:textStyle="bold"
-        android:textColor="#1E88E5"
-        android:layout_marginBottom="8dp" />
-
-    <TextView
-        android:id="@+id/tvWeather"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textSize="16sp" />
-
-</LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>
