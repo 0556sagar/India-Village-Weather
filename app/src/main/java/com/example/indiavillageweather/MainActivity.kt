@@ -28,6 +28,8 @@ import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,6 +38,9 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.text.NumberFormat
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
@@ -44,8 +49,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSearch: Button
     private lateinit var btnLocation: Button
     private lateinit var tvLocation: TextView
+    private lateinit var tvPopulation: TextView
     private lateinit var tvTemperature: TextView
     private lateinit var tvWeather: TextView
+    private lateinit var tvRainPrediction: TextView
+    private lateinit var tvAqi: TextView
+    private lateinit var tvUvIndex: TextView
+    private lateinit var tvSunTimes: TextView
     private lateinit var progressBar: ProgressBar
 
     private val defaultLocation = "New Delhi, Delhi"
@@ -79,8 +89,13 @@ class MainActivity : AppCompatActivity() {
         btnSearch = findViewById(R.id.btnSearch)
         btnLocation = findViewById(R.id.btnLocation)
         tvLocation = findViewById(R.id.tvLocation)
+        tvPopulation = findViewById(R.id.tvPopulation)
         tvTemperature = findViewById(R.id.tvTemperature)
         tvWeather = findViewById(R.id.tvWeather)
+        tvRainPrediction = findViewById(R.id.tvRainPrediction)
+        tvAqi = findViewById(R.id.tvAqi)
+        tvUvIndex = findViewById(R.id.tvUvIndex)
+        tvSunTimes = findViewById(R.id.tvSunTimes)
         progressBar = findViewById(R.id.progressBar)
 
         btnSearch.setOnClickListener {
@@ -178,7 +193,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (bestLastLocation != null && (System.currentTimeMillis() - bestLastLocation.time) < 2 * 60 * 1000) {
-                fetchWeatherByCoords(bestLastLocation.latitude, bestLastLocation.longitude, null)
+                fetchWeatherByCoords(bestLastLocation.latitude, bestLastLocation.longitude, null, null)
                 return
             }
 
@@ -200,7 +215,7 @@ class MainActivity : AppCompatActivity() {
             override fun onLocationChanged(location: Location) {
                 locationTimeoutJob?.cancel()
                 safeRemoveLocationUpdates(locationManager)
-                fetchWeatherByCoords(location.latitude, location.longitude, null)
+                fetchWeatherByCoords(location.latitude, location.longitude, null, null)
             }
 
             override fun onProviderDisabled(provider: String) {}
@@ -248,7 +263,7 @@ class MainActivity : AppCompatActivity() {
         if (!requestedAnyProvider) {
             activeLocationListener = null
             if (fallbackLocation != null) {
-                fetchWeatherByCoords(fallbackLocation.latitude, fallbackLocation.longitude, null)
+                fetchWeatherByCoords(fallbackLocation.latitude, fallbackLocation.longitude, null, null)
             } else {
                 progressBar.visibility = View.GONE
                 fetchWeatherForVillage(defaultLocation)
@@ -261,7 +276,7 @@ class MainActivity : AppCompatActivity() {
             safeRemoveLocationUpdates(locationManager)
 
             if (fallbackLocation != null) {
-                fetchWeatherByCoords(fallbackLocation.latitude, fallbackLocation.longitude, null)
+                fetchWeatherByCoords(fallbackLocation.latitude, fallbackLocation.longitude, null, null)
             } else {
                 if (!isFinishing && !isDestroyed) {
                     progressBar.visibility = View.GONE
@@ -284,6 +299,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private data class PlaceInfo(val name: String, val population: String)
+
+    private fun formatPopulation(rawPop: String?): String {
+        if (rawPop.isNullOrBlank()) return "Not available"
+        val digitsOnly = rawPop.replace(",", "").trim().toLongOrNull()
+        return if (digitsOnly != null) {
+            NumberFormat.getNumberInstance(Locale("en", "IN")).format(digitsOnly)
+        } else {
+            rawPop
+        }
+    }
+
     private fun fetchWeatherForVillage(query: String) {
         if (isFinishing || isDestroyed) return
         progressBar.visibility = View.VISIBLE
@@ -291,7 +318,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val encodedQuery = URLEncoder.encode(query, "UTF-8")
-                val geocodeUrl = "https://nominatim.openstreetmap.org/search?format=json&q=$encodedQuery&countrycodes=in&limit=1"
+                val geocodeUrl = "https://nominatim.openstreetmap.org/search?format=json&q=$encodedQuery&countrycodes=in&limit=1&extratags=1"
 
                 val request = Request.Builder()
                     .url(geocodeUrl)
@@ -315,7 +342,9 @@ class MainActivity : AppCompatActivity() {
                             if (lat != null && lon != null) {
                                 val displayName = firstResult.optString("display_name", query)
                                 val shortName = displayName.split(",").take(2).joinToString(",").trim()
-                                fetchWeatherByCoordsIO(lat, lon, shortName)
+                                val extraTags = firstResult.optJSONObject("extratags")
+                                val population = formatPopulation(extraTags?.optString("population"))
+                                fetchWeatherByCoordsIO(lat, lon, shortName, population)
                             } else {
                                 showError("Invalid coordinates returned for: $query")
                             }
@@ -333,19 +362,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun fetchWeatherByCoords(lat: Double, lon: Double, locationTitle: String?) {
+    private fun fetchWeatherByCoords(lat: Double, lon: Double, locationTitle: String?, populationText: String?) {
         if (isFinishing || isDestroyed) return
         progressBar.visibility = View.VISIBLE
 
         lifecycleScope.launch(Dispatchers.IO) {
-            val resolvedName = locationTitle ?: reverseGeocode(lat, lon)
-            fetchWeatherByCoordsIO(lat, lon, resolvedName)
+            val place = if (locationTitle != null) {
+                PlaceInfo(locationTitle, populationText ?: "Not available")
+            } else {
+                reverseGeocode(lat, lon)
+            }
+            fetchWeatherByCoordsIO(lat, lon, place.name, place.population)
         }
     }
 
-    private fun reverseGeocode(lat: Double, lon: Double): String {
+    private fun reverseGeocode(lat: Double, lon: Double): PlaceInfo {
         return try {
-            val url = "https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lon"
+            val url = "https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lon&extratags=1"
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", "IndiaVillageWeather/1.0 (com.example.indiavillageweather)")
@@ -363,29 +396,103 @@ class MainActivity : AppCompatActivity() {
                         ?.ifEmpty { address.optString("county") }
                     val state = address?.optString("state")
 
-                    if (!villageOrCity.isNullOrEmpty() && !state.isNullOrEmpty()) {
+                    val resolvedName = if (!villageOrCity.isNullOrEmpty() && !state.isNullOrEmpty()) {
                         "$villageOrCity, $state"
                     } else {
                         json.optString("display_name", "Current Location").split(",").take(2).joinToString(",")
                     }
+
+                    val extraTags = json.optJSONObject("extratags")
+                    val pop = formatPopulation(extraTags?.optString("population"))
+                    PlaceInfo(resolvedName, pop)
                 } else {
-                    "Current Location"
+                    PlaceInfo("Current Location", "Not available")
                 }
             }
         } catch (e: Exception) {
-            "Current Location"
+            PlaceInfo("Current Location", "Not available")
         }
     }
 
-    private suspend fun fetchWeatherByCoordsIO(lat: Double, lon: Double, locationTitle: String) {
-        try {
-            val weatherUrl = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-                "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m" +
-                "&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1"
+    private data class AirAndUvData(val aqi: Int?, val pm25: Double?, val uvIndex: Double?)
 
-            val request = Request.Builder()
-                .url(weatherUrl)
-                .build()
+    private fun fetchAirQualityAndUv(lat: Double, lon: Double): AirAndUvData {
+        return try {
+            val url = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=$lat&longitude=$lon" +
+                "&current=us_aqi,pm2_5,uv_index&timezone=auto"
+            val request = Request.Builder().url(url).build()
+
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string()?.trim()
+                if (response.isSuccessful && !body.isNullOrBlank() && body.startsWith("{")) {
+                    val current = JSONObject(body).optJSONObject("current")
+                    val aqi = if (current != null && current.has("us_aqi") && !current.isNull("us_aqi")) {
+                        current.optInt("us_aqi")
+                    } else null
+                    val pm25 = if (current != null && current.has("pm2_5") && !current.isNull("pm2_5")) {
+                        current.optDouble("pm2_5")
+                    } else null
+                    val uv = if (current != null && current.has("uv_index") && !current.isNull("uv_index")) {
+                        current.optDouble("uv_index")
+                    } else null
+                    AirAndUvData(aqi, pm25, uv)
+                } else {
+                    AirAndUvData(null, null, null)
+                }
+            }
+        } catch (e: Exception) {
+            AirAndUvData(null, null, null)
+        }
+    }
+
+    private fun formatSunTime(isoDateTime: String?): String {
+        if (isoDateTime.isNullOrBlank()) return "--"
+        return try {
+            val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.US)
+            val formatter = SimpleDateFormat("hh:mm a", Locale.US)
+            val date = parser.parse(isoDateTime)
+            if (date != null) formatter.format(date) else isoDateTime.substringAfter("T")
+        } catch (e: Exception) {
+            isoDateTime.substringAfter("T", "--")
+        }
+    }
+
+    private fun getAqiLabel(aqi: Int): String {
+        return when {
+            aqi <= 50 -> "Good"
+            aqi <= 100 -> "Moderate"
+            aqi <= 150 -> "Unhealthy for Sensitive"
+            aqi <= 200 -> "Unhealthy"
+            aqi <= 300 -> "Very Unhealthy"
+            else -> "Hazardous"
+        }
+    }
+
+    private fun getUvLabel(uv: Double): String {
+        return when {
+            uv < 3.0 -> "Low"
+            uv < 6.0 -> "Moderate"
+            uv < 8.0 -> "High"
+            uv < 11.0 -> "Very High"
+            else -> "Extreme"
+        }
+    }
+
+    private suspend fun fetchWeatherByCoordsIO(
+        lat: Double,
+        lon: Double,
+        locationTitle: String,
+        populationText: String
+    ) = coroutineScope {
+        try {
+            val airUvDeferred = async(Dispatchers.IO) { fetchAirQualityAndUv(lat, lon) }
+
+            val weatherUrl = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
+                "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m" +
+                "&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,precipitation_probability_max,uv_index_max" +
+                "&timezone=auto&forecast_days=1"
+
+            val request = Request.Builder().url(weatherUrl).build()
 
             client.newCall(request).execute().use { response ->
                 val responseBody = response.body?.string()?.trim()
@@ -405,29 +512,61 @@ class MainActivity : AppCompatActivity() {
                     val windSpeed = current.optDouble("wind_speed_10m", 0.0)
                     val weatherCode = current.optInt("weather_code", -1)
 
-                    val maxArr = daily.optJSONArray("temperature_2m_max")
-                    val minArr = daily.optJSONArray("temperature_2m_min")
-                    val maxTemp = if (maxArr != null && maxArr.length() > 0) maxArr.optDouble(0, temp) else temp
-                    val minTemp = if (minArr != null && minArr.length() > 0) minArr.optDouble(0, temp) else temp
+                    val maxTemp = daily.optJSONArray("temperature_2m_max")?.optDouble(0, temp) ?: temp
+                    val minTemp = daily.optJSONArray("temperature_2m_min")?.optDouble(0, temp) ?: temp
+
+                    val rainChance = daily.optJSONArray("precipitation_probability_max")?.optInt(0, 0) ?: 0
+                    val rainMm = daily.optJSONArray("precipitation_sum")?.optDouble(0, 0.0) ?: 0.0
+                    val dailyMaxUv = daily.optJSONArray("uv_index_max")?.optDouble(0, Double.NaN) ?: Double.NaN
+
+                    val sunriseRaw = daily.optJSONArray("sunrise")?.optString(0)
+                    val sunsetRaw = daily.optJSONArray("sunset")?.optString(0)
+                    val sunriseFormatted = formatSunTime(sunriseRaw)
+                    val sunsetFormatted = formatSunTime(sunsetRaw)
 
                     if (temp.isNaN()) {
                         showError("Temperature unavailable")
                         return@use
                     }
 
+                    val airUv = airUvDeferred.await()
                     val conditionText = getWeatherDescription(weatherCode)
+
+                    val aqiDisplay = if (airUv.aqi != null) {
+                        val pmPart = if (airUv.pm25 != null) " (PM2.5: ${airUv.pm25} µg/m³)" else ""
+                        "😷 AQI: ${airUv.aqi} (${getAqiLabel(airUv.aqi)})$pmPart"
+                    } else {
+                        "😷 AQI: Unavailable"
+                    }
+
+                    val uvValue = airUv.uvIndex ?: if (!dailyMaxUv.isNaN()) dailyMaxUv else null
+                    val uvDisplay = if (uvValue != null) {
+                        val formattedUv = String.format(Locale.US, "%.1f", uvValue)
+                        "☀️ UV Light: $formattedUv (${getUvLabel(uvValue)})"
+                    } else {
+                        "☀️ UV Light: Unavailable"
+                    }
+
+                    val rainDisplay = "🌧️ Rain Prediction: $rainChance% chance (${String.format(Locale.US, "%.1f", rainMm)} mm expected)"
+                    val sunDisplay = "🌅 Sunrise: $sunriseFormatted   |   🌇 Sunset: $sunsetFormatted"
 
                     withContext(Dispatchers.Main) {
                         if (isFinishing || isDestroyed) return@withContext
                         progressBar.visibility = View.GONE
                         tvLocation.text = locationTitle
+                        tvPopulation.text = "👥 Population: $populationText"
                         tvTemperature.text = "${temp}°C"
                         tvWeather.text = buildString {
                             append("$conditionText\n")
                             append("Feels like: ${feelsLike}°C  |  H: ${maxTemp}° L: ${minTemp}°\n")
                             append("Humidity: $humidity%  |  Wind: $windSpeed km/h")
                         }
-                        showWeatherNotification(locationTitle, temp, conditionText)
+                        tvRainPrediction.text = rainDisplay
+                        tvAqi.text = aqiDisplay
+                        tvUvIndex.text = uvDisplay
+                        tvSunTimes.text = sunDisplay
+
+                        showWeatherNotification(locationTitle, temp, "$conditionText • Rain: $rainChance%")
                     }
                 } else {
                     showError("Failed to load weather data (${response.code})")
