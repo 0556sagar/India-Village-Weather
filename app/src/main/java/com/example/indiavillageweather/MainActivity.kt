@@ -61,6 +61,8 @@ class MainActivity : AppCompatActivity() {
     private val defaultLocation = "New Delhi, Delhi"
     private var locationTimeoutJob: Job? = null
     private var activeLocationListener: LocationListener? = null
+    private var hasSyncedLiveLocation = false
+    private var waitingForLocationSettings = false
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -74,7 +76,7 @@ class MainActivity : AppCompatActivity() {
         val coarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
 
         if (fineLocationGranted || coarseLocationGranted) {
-            fetchDeviceLocationWeather()
+            fetchDeviceLocationWeather(isAutoSync = true)
         } else {
             Toast.makeText(this, "Location permission denied. Showing $defaultLocation weather.", Toast.LENGTH_SHORT).show()
             fetchWeatherForVillage(defaultLocation)
@@ -101,6 +103,7 @@ class MainActivity : AppCompatActivity() {
         btnSearch.setOnClickListener {
             val query = etSearch.text.toString().trim()
             if (query.isNotEmpty()) {
+                hasSyncedLiveLocation = true
                 fetchWeatherForVillage(query)
             } else {
                 Toast.makeText(this, "Please enter a village or city name", Toast.LENGTH_SHORT).show()
@@ -108,10 +111,23 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnLocation.setOnClickListener {
-            checkLocationPermissionAndFetch()
+            checkLocationPermissionAndFetch(isAutoSync = false)
         }
 
-        fetchWeatherForVillage(defaultLocation)
+        // Automatically sync with live location on startup if permission & location services are enabled
+        checkLocationPermissionAndFetch(isAutoSync = true)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        val isLocationOn = locationManager != null && LocationManagerCompat.isLocationEnabled(locationManager)
+
+        // Auto-sync if user just enabled GPS/Location or granted permission while returning to app
+        if (hasLocationPermission() && isLocationOn && (!hasSyncedLiveLocation || waitingForLocationSettings)) {
+            waitingForLocationSettings = false
+            fetchDeviceLocationWeather(isAutoSync = true)
+        }
     }
 
     private fun hasLocationPermission(): Boolean {
@@ -120,7 +136,7 @@ class MainActivity : AppCompatActivity() {
         return hasFine || hasCoarse
     }
 
-    private fun checkLocationPermissionAndFetch() {
+    private fun checkLocationPermissionAndFetch(isAutoSync: Boolean) {
         val permissionsToRequest = mutableListOf<String>()
 
         if (!hasLocationPermission()) {
@@ -137,12 +153,12 @@ class MainActivity : AppCompatActivity() {
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
         } else {
-            fetchDeviceLocationWeather()
+            fetchDeviceLocationWeather(isAutoSync)
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun fetchDeviceLocationWeather() {
+    private fun fetchDeviceLocationWeather(isAutoSync: Boolean = false) {
         if (!hasLocationPermission()) {
             fetchWeatherForVillage(defaultLocation)
             return
@@ -155,15 +171,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (!LocationManagerCompat.isLocationEnabled(locationManager)) {
-            Toast.makeText(this, "Please turn on device Location / GPS", Toast.LENGTH_LONG).show()
-            try {
-                startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-            } catch (e: Exception) {
-                e.printStackTrace()
+            if (isAutoSync) {
+                // On auto startup, don't force-open Settings; load default weather and wait for GPS
+                fetchWeatherForVillage(defaultLocation)
+            } else {
+                waitingForLocationSettings = true
+                Toast.makeText(this, "Please turn on device Location / GPS", Toast.LENGTH_LONG).show()
+                try {
+                    startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
             return
         }
 
+        hasSyncedLiveLocation = true
         progressBar.visibility = View.VISIBLE
 
         try {
@@ -316,27 +339,17 @@ class MainActivity : AppCompatActivity() {
         return cleaned.toDoubleOrNull()?.toLong()
     }
 
-    /**
-     * Fetches official population from public sources:
-     * 1. OSM extratags population (if present)
-     * 2. Wikidata EntityData API (Property P1082 - Census population) via Wikidata Q-ID
-     * 3. Wikidata Search API by place name (filtered for Indian villages/towns/cities)
-     * 4. Fallback to district/tehsil population if village has no individual census entry
-     */
-    private fun fetchPublicPopulation(place: PlaceInfo): String {
-        // 1. Direct OSM tag
+    private fun fetchPublicPopulation(place: PlaceInfo, lat: Double, lon: Double): String {
         parsePopulationNumber(place.rawPopulation)?.let {
             return formatIndianNumber(it)
         }
 
-        // 2. Wikidata Q-ID from Nominatim extratags
         if (!place.wikidataId.isNullOrBlank()) {
             fetchWikidataPopulationById(place.wikidataId)?.let {
                 return "${formatIndianNumber(it)} (Census)"
             }
         }
 
-        // 3. Search Wikidata by place name (e.g. "Bhanda, Rajasthan")
         val primaryQuery = place.name.trim()
         if (primaryQuery.isNotEmpty() && primaryQuery != "Current Location") {
             searchWikidataPopulationByName(primaryQuery)?.let {
@@ -350,14 +363,51 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 4. Fallback to parent tehsil/district population if village record lacks census count
+        fetchNearbyCensusPopulation(lat, lon)?.let { (nearbyName, pop) ->
+            return "${formatIndianNumber(pop)} (Near $nearbyName)"
+        }
+
         if (!place.fallbackRegionName.isNullOrBlank() && place.fallbackRegionName != primaryQuery) {
             searchWikidataPopulationByName(place.fallbackRegionName)?.let {
-                return "${formatIndianNumber(it)} (${place.fallbackRegionName.substringBefore(",")} region)"
+                return "${formatIndianNumber(it)} (${place.fallbackRegionName.substringBefore(",")} District)"
             }
         }
 
-        return "Not recorded in public census"
+        return "Unavailable (No public census record)"
+    }
+
+    private fun fetchNearbyCensusPopulation(lat: Double, lon: Double): Pair<String, Long>? {
+        return try {
+            val url = "https://en.wikipedia.org/w/api.php?action=query&generator=geosearch" +
+                "&ggscoord=$lat|$lon&ggsradius=10000&ggslimit=5&prop=pageprops&ppprop=wikibase_item&format=json"
+
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "IndiaVillageWeather/1.0 (com.example.indiavillageweather)")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string()?.trim()
+                if (!response.isSuccessful || body.isNullOrBlank() || !body.startsWith("{")) return null
+
+                val pages = JSONObject(body).optJSONObject("query")?.optJSONObject("pages") ?: return null
+                val keys = pages.keys()
+                while (keys.hasNext()) {
+                    val page = pages.optJSONObject(keys.next()) ?: continue
+                    val title = page.optString("title")
+                    val qId = page.optJSONObject("pageprops")?.optString("wikibase_item")
+                    if (!qId.isNullOrBlank()) {
+                        val pop = fetchWikidataPopulationById(qId)
+                        if (pop != null && pop > 0) {
+                            return Pair(title, pop)
+                        }
+                    }
+                }
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun fetchWikidataPopulationById(qId: String): Long? {
@@ -638,7 +688,7 @@ class MainActivity : AppCompatActivity() {
     ) = coroutineScope {
         try {
             val airUvDeferred = async(Dispatchers.IO) { fetchAirQualityAndUv(lat, lon) }
-            val populationDeferred = async(Dispatchers.IO) { fetchPublicPopulation(place) }
+            val populationDeferred = async(Dispatchers.IO) { fetchPublicPopulation(place, lat, lon) }
 
             val weatherUrl = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
                 "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m" +
