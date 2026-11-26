@@ -2,14 +2,17 @@ package com.example.indiavillageweather
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Looper
@@ -59,6 +62,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progressBar: ProgressBar
 
     private val defaultLocation = "New Delhi, Delhi"
+    private val githubLatestReleaseApi = "https://api.github.com/repos/0556sagar/India-Village-Weather/releases/latest"
+    private val githubReleasesFallbackUrl = "https://github.com/0556sagar/India-Village-Weather/releases/latest"
+
     private var locationTimeoutJob: Job? = null
     private var activeLocationListener: LocationListener? = null
     private var hasSyncedLiveLocation = false
@@ -114,16 +120,169 @@ class MainActivity : AppCompatActivity() {
             checkLocationPermissionAndFetch(isAutoSync = false)
         }
 
+        // Check GitHub Releases for newer APK version
+        checkForAppUpdate()
+
         // Automatically sync with live location on startup if permission & location services are enabled
         checkLocationPermissionAndFetch(isAutoSync = true)
     }
+
+    // --- GitHub Release Update Checker ---
+
+    private fun checkForAppUpdate() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url(githubLatestReleaseApi)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("User-Agent", "IndiaVillageWeather-Android")
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string()?.trim()
+                    if (!response.isSuccessful || body.isNullOrBlank() || !body.startsWith("{")) return@use
+
+                    val json = JSONObject(body)
+                    val latestTag = json.optString("tag_name", "").trim()
+                    val releaseNotes = json.optString("body", "Bug fixes and performance improvements.").trim()
+                    val htmlUrl = json.optString("html_url", githubReleasesFallbackUrl)
+
+                    // Find direct .apk asset URL if attached to the GitHub release
+                    var apkDownloadUrl = htmlUrl
+                    val assets = json.optJSONArray("assets")
+                    if (assets != null) {
+                        for (i in 0 until assets.length()) {
+                            val asset = assets.optJSONObject(i) ?: continue
+                            val assetName = asset.optString("name", "")
+                            val downloadUrl = asset.optString("browser_download_url", "")
+                            if (assetName.endsWith(".apk", ignoreCase = true) && downloadUrl.isNotEmpty()) {
+                                apkDownloadUrl = downloadUrl
+                                break
+                            }
+                        }
+                    }
+
+                    val currentVersion = getCurrentAppVersion()
+                    if (latestTag.isNotEmpty() && isNewerVersion(latestTag, currentVersion)) {
+                        withContext(Dispatchers.Main) {
+                            if (isFinishing || isDestroyed) return@withContext
+                            showAppUpdateNotification(latestTag, apkDownloadUrl)
+                            showAppUpdateDialog(latestTag, releaseNotes, apkDownloadUrl)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun getCurrentAppVersion(): String {
+        return try {
+            val pInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, 0)
+            }
+            pInfo.versionName ?: "1.0"
+        } catch (e: Exception) {
+            "1.0"
+        }
+    }
+
+    private fun isNewerVersion(latestTag: String, currentVersion: String): Boolean {
+        val latestParts = latestTag.removePrefix("v").removePrefix("V")
+            .split(".")
+            .mapNotNull { it.filter { ch -> ch.isDigit() }.toIntOrNull() }
+        val currentParts = currentVersion.removePrefix("v").removePrefix("V")
+            .split(".")
+            .mapNotNull { it.filter { ch -> ch.isDigit() }.toIntOrNull() }
+
+        val maxLen = maxOf(latestParts.size, currentParts.size)
+        for (i in 0 until maxLen) {
+            val l = latestParts.getOrElse(i) { 0 }
+            val c = currentParts.getOrElse(i) { 0 }
+            if (l > c) return true
+            if (l < c) return false
+        }
+        return false
+    }
+
+    private fun showAppUpdateNotification(latestVersion: String, downloadUrl: String) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                return
+            }
+
+            val channelId = "app_updates_channel"
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    channelId,
+                    "App Updates",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Notifications when a new version of India Village Weather is available"
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+
+            val openBrowserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pendingIntent = PendingIntent.getActivity(this, 202, openBrowserIntent, pendingIntentFlags)
+
+            val notification = NotificationCompat.Builder(this, channelId)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle("New App Update Available ($latestVersion)")
+                .setContentText("Tap to download the latest India Village Weather APK.")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .build()
+
+            notificationManager.notify(202, notification)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun showAppUpdateDialog(latestVersion: String, releaseNotes: String, downloadUrl: String) {
+        try {
+            if (isFinishing || isDestroyed) return
+            AlertDialog.Builder(this)
+                .setTitle("🚀 Update Available ($latestVersion)")
+                .setMessage("A new version of India Village Weather is ready.\n\nWhat's New:\n$releaseNotes")
+                .setPositiveButton("Download APK") { _, _ ->
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)))
+                    } catch (e: Exception) {
+                        Toast.makeText(this, "Unable to open browser", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .setNegativeButton("Later", null)
+                .show()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // --- Location & Weather Logic ---
 
     override fun onResume() {
         super.onResume()
         val locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
         val isLocationOn = locationManager != null && LocationManagerCompat.isLocationEnabled(locationManager)
 
-        // Auto-sync if user just enabled GPS/Location or granted permission while returning to app
         if (hasLocationPermission() && isLocationOn && (!hasSyncedLiveLocation || waitingForLocationSettings)) {
             waitingForLocationSettings = false
             fetchDeviceLocationWeather(isAutoSync = true)
@@ -172,7 +331,6 @@ class MainActivity : AppCompatActivity() {
 
         if (!LocationManagerCompat.isLocationEnabled(locationManager)) {
             if (isAutoSync) {
-                // On auto startup, don't force-open Settings; load default weather and wait for GPS
                 fetchWeatherForVillage(defaultLocation)
             } else {
                 waitingForLocationSettings = true
