@@ -73,7 +73,10 @@ class MainActivity : AppCompatActivity() {
         initViews()
         setupListeners()
         createNotificationChannel()
-        checkAndRequestPermissions()
+
+        mainHandler.postDelayed({
+            checkAndRequestPermissions()
+        }, 300)
     }
 
     private fun initViews() {
@@ -114,7 +117,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 1. Permission Popup Logic (Location + Notification)
     private fun checkAndRequestPermissions() {
         val permissionsNeeded = mutableListOf<String>()
 
@@ -151,7 +153,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 2. GPS Current Location Fetch + Village Name Detection
     @SuppressLint("MissingPermission")
     private fun getCurrentLocationWeather() {
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -226,7 +227,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 3. Manual Search Logic
     private fun performSearch() {
         val query = etSearch.text.toString().trim()
         if (query.isEmpty()) {
@@ -235,3 +235,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         hideKeyboard()
+        progressBar.visibility = View.VISIBLE
+
+        executor.execute {
+            try {
