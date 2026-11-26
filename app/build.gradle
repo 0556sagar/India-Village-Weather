@@ -3,6 +3,9 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+def appVersionCode = project.hasProperty('versionCode') ? project.property('versionCode').toInteger() : 29
+def appVersionName = project.hasProperty('versionName') ? project.property('versionName').toString() : "1.0.29"
+
 android {
     namespace 'com.example.indiavillageweather'
     compileSdk 35
@@ -11,8 +14,8 @@ android {
         applicationId "com.example.indiavillageweather"
         minSdk 29
         targetSdk 35
-        versionCode 29
-        versionName "1.0.29"
+        versionCode appVersionCode
+        versionName appVersionName
     }
 
     buildTypes {
@@ -35,6 +38,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.0")
+    implementation("androidx.cardview:cardview:1.0.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
