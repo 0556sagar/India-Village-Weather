@@ -239,3 +239,289 @@ class MainActivity : AppCompatActivity() {
 
         executor.execute {
             try {
+                val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+                val geoJson = JSONObject(
+                    httpGet("https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=1&language=en&format=json")
+                )
+                val results = geoJson.optJSONArray("results")
+                if (results == null || results.length() == 0) {
+                    mainHandler.post {
+                        progressBar.visibility = View.GONE
+                        Toast.makeText(this, "Location not found: $query", Toast.LENGTH_SHORT).show()
+                    }
+                    return@execute
+                }
+
+                val place = results.getJSONObject(0)
+                val lat = place.getDouble("latitude")
+                val lon = place.getDouble("longitude")
+                val name = place.optString("name", query)
+                val hierarchy = listOf(
+                    name,
+                    place.optString("admin2"),
+                    place.optString("admin1"),
+                    place.optString("country")
+                ).filter { it.isNotEmpty() }.distinct().joinToString(", ")
+                val population = place.optLong("population", 0L)
+
+                mainHandler.post {
+                    tvLocationName.text = name
+                    tvLocationHierarchy.text = hierarchy
+                    tvPopulation.text = if (population > 0)
+                        "👥 Population: ${String.format(Locale.getDefault(), "%,d", population)}"
+                    else
+                        "👥 Population: N/A"
+                }
+
+                fetchWeatherData(lat, lon, name)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Search error", e)
+                mainHandler.post {
+                    progressBar.visibility = View.GONE
+                    Toast.makeText(this, "Search failed. Check your internet.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // Runs on the background executor thread (blocking network calls).
+    private fun fetchWeatherData(lat: Double, lon: Double, cityName: String) {
+        try {
+            val forecastUrl = "https://api.open-meteo.com/v1/forecast" +
+                    "?latitude=${String.format(Locale.US, "%.4f", lat)}" +
+                    "&longitude=${String.format(Locale.US, "%.4f", lon)}" +
+                    "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m" +
+                    "&hourly=temperature_2m,weather_code,precipitation_probability" +
+                    "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max" +
+                    "&timezone=auto&forecast_days=7"
+            val root = JSONObject(httpGet(forecastUrl))
+
+            val current = root.getJSONObject("current")
+            val hourly = root.getJSONObject("hourly")
+            val daily = root.getJSONObject("daily")
+
+            val temp = current.getDouble("temperature_2m")
+            val feels = current.getDouble("apparent_temperature")
+            val humidity = current.getInt("relative_humidity_2m")
+            val wind = current.getDouble("wind_speed_10m")
+            val code = current.getInt("weather_code")
+            val isDay = current.optInt("is_day", 1) == 1
+            val nowTime = current.getString("time") // e.g. 2026-11-26T09:15
+
+            val maxToday = daily.getJSONArray("temperature_2m_max").getDouble(0)
+            val minToday = daily.getJSONArray("temperature_2m_min").getDouble(0)
+            val rainToday = daily.getJSONArray("precipitation_probability_max").optInt(0, 0)
+            val uvToday = daily.getJSONArray("uv_index_max").optDouble(0, 0.0)
+            val sunrise = daily.getJSONArray("sunrise").getString(0).substringAfter("T")
+            val sunset = daily.getJSONArray("sunset").getString(0).substringAfter("T")
+
+            // Air quality is optional: don't fail the whole screen if it errors
+            var aqiText = "N/A"
+            try {
+                val aqUrl = "https://air-quality-api.open-meteo.com/v1/air-quality" +
+                        "?latitude=${String.format(Locale.US, "%.4f", lat)}" +
+                        "&longitude=${String.format(Locale.US, "%.4f", lon)}&current=us_aqi"
+                val aq = JSONObject(httpGet(aqUrl)).getJSONObject("current")
+                if (!aq.isNull("us_aqi")) {
+                    val aqi = aq.getInt("us_aqi")
+                    aqiText = "$aqi (${aqiLabel(aqi)})"
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "AQI error", e)
+            }
+
+            // Next 24 hours starting from the current hour
+            val hTimes = hourly.getJSONArray("time")
+            val hTemps = hourly.getJSONArray("temperature_2m")
+            val hCodes = hourly.getJSONArray("weather_code")
+            val currentHour = nowTime.substring(0, 13) + ":00"
+            var startIdx = 0
+            for (i in 0 until hTimes.length()) {
+                if (hTimes.getString(i) >= currentHour) {
+                    startIdx = i
+                    break
+                }
+            }
+            val endIdx = minOf(startIdx + 24, hTimes.length())
+
+            val dTimes = daily.getJSONArray("time")
+            val dCodes = daily.getJSONArray("weather_code")
+            val dMax = daily.getJSONArray("temperature_2m_max")
+            val dMin = daily.getJSONArray("temperature_2m_min")
+
+            val (conditionText, conditionEmoji) = describeWeather(code)
+
+            mainHandler.post {
+                tvTemp.text = "${Math.round(temp)}°C"
+                tvCondition.text = "$conditionEmoji $conditionText"
+                tvTempRange.text = "H: ${Math.round(maxToday)}°  L: ${Math.round(minToday)}°"
+                tvFeelsLike.text = "🌡️ Feels like ${Math.round(feels)}°C"
+                tvHumidity.text = "💧 Humidity: $humidity%"
+                tvWind.text = "💨 Wind: ${Math.round(wind)} km/h"
+                tvRainChance.text = "🌧️ Rain chance: $rainToday%"
+                tvUvIndex.text = "☀️ UV Index: ${String.format(Locale.US, "%.1f", uvToday)} (${uvLabel(uvToday)})"
+                tvAirQuality.text = "🌫️ Air quality: $aqiText"
+                tvSunrise.text = "🌅 Sunrise: $sunrise"
+                tvSunset.text = "🌇 Sunset: $sunset"
+
+                // If WeatherBackgroundView has a method to set the weather, call it here, e.g.:
+                // weatherBackgroundView.setWeather(code, isDay)
+
+                val density = resources.displayMetrics.density
+                val pad = (8 * density).toInt()
+
+                layoutHourlyContainer.removeAllViews()
+                for (i in startIdx until endIdx) {
+                    val hour = hTimes.getString(i).substringAfter("T")
+                    val (_, emoji) = describeWeather(hCodes.getInt(i))
+                    val tv = TextView(this).apply {
+                        text = "$hour\n$emoji\n${Math.round(hTemps.getDouble(i))}°"
+                        gravity = Gravity.CENTER
+                        setTextColor(Color.WHITE)
+                        textSize = 14f
+                        setPadding(pad * 2, pad, pad * 2, pad)
+                    }
+                    layoutHourlyContainer.addView(tv)
+                }
+
+                layoutDailyContainer.removeAllViews()
+                val parser = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                val dayFmt = java.text.SimpleDateFormat("EEE, d MMM", Locale.getDefault())
+                for (i in 0 until dTimes.length()) {
+                    val label = try {
+                        dayFmt.format(parser.parse(dTimes.getString(i))!!)
+                    } catch (e: Exception) {
+                        dTimes.getString(i)
+                    }
+                    val (desc, emoji) = describeWeather(dCodes.getInt(i))
+                    val tv = TextView(this).apply {
+                        text = "$label   $emoji $desc   ${Math.round(dMin.getDouble(i))}° / ${Math.round(dMax.getDouble(i))}°"
+                        setTextColor(Color.WHITE)
+                        textSize = 15f
+                        setPadding(pad, pad, pad, pad)
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        )
+                    }
+                    layoutDailyContainer.addView(tv)
+                }
+
+                progressBar.visibility = View.GONE
+            }
+
+            // Simple weather alerts
+            when {
+                rainToday >= 70 -> showAlertNotification(
+                    "Rain likely in $cityName",
+                    "Chance of rain today: $rainToday%. Carry an umbrella."
+                )
+                maxToday >= 42 -> showAlertNotification(
+                    "Heat alert for $cityName",
+                    "High of ${Math.round(maxToday)}°C expected today. Stay hydrated."
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Weather error", e)
+            mainHandler.post {
+                progressBar.visibility = View.GONE
+                Toast.makeText(this, "Could not load weather. Check your internet.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun httpGet(urlString: String): String {
+        val conn = URL(urlString).openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
+        try {
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) {
+                throw Exception("HTTP ${conn.responseCode}")
+            }
+            return conn.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun describeWeather(code: Int): Pair<String, String> = when (code) {
+        0 -> "Clear sky" to "☀️"
+        1 -> "Mainly clear" to "🌤️"
+        2 -> "Partly cloudy" to "⛅"
+        3 -> "Overcast" to "☁️"
+        45, 48 -> "Fog" to "🌫️"
+        51, 53, 55 -> "Drizzle" to "🌦️"
+        56, 57 -> "Freezing drizzle" to "🌧️"
+        61, 63, 65 -> "Rain" to "🌧️"
+        66, 67 -> "Freezing rain" to "🌧️"
+        71, 73, 75, 77 -> "Snow" to "❄️"
+        80, 81, 82 -> "Rain showers" to "🌦️"
+        85, 86 -> "Snow showers" to "🌨️"
+        95 -> "Thunderstorm" to "⛈️"
+        96, 99 -> "Thunderstorm with hail" to "⛈️"
+        else -> "Unknown" to "🌡️"
+    }
+
+    private fun aqiLabel(aqi: Int): String = when {
+        aqi <= 50 -> "Good"
+        aqi <= 100 -> "Moderate"
+        aqi <= 150 -> "Unhealthy for sensitive"
+        aqi <= 200 -> "Unhealthy"
+        aqi <= 300 -> "Very unhealthy"
+        else -> "Hazardous"
+    }
+
+    private fun uvLabel(uv: Double): String = when {
+        uv < 3 -> "Low"
+        uv < 6 -> "Moderate"
+        uv < 8 -> "High"
+        uv < 11 -> "Very high"
+        else -> "Extreme"
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun showAlertNotification(title: String, message: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+
+        androidx.core.app.NotificationManagerCompat.from(this).notify(1001, notification)
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Weather Alerts",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Rain and heat alerts for your village"
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun hideKeyboard() {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        currentFocus?.let { imm.hideSoftInputFromWindow(it.windowToken, 0) }
+    }
+}
+
