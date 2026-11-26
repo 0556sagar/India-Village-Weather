@@ -1,276 +1,316 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F0F4F8"
-    android:fillViewport="true"
     tools:context=".MainActivity">
 
-    <androidx.constraintlayout.widget.ConstraintLayout
+    <com.example.indiavillageweather.ui.WeatherBackgroundView
+        android:id="@+id/weatherBackgroundView"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="20dp">
+        android:layout_height="match_parent" />
 
-        <!-- Search Box -->
-        <EditText
-            android:id="@+id/etSearch"
-            android:layout_width="0dp"
-            android:layout_height="52dp"
-            android:layout_marginEnd="8dp"
-            android:background="@android:drawable/edit_text"
-            android:hint="Enter village or city (e.g. Bhanda)"
-            android:imeOptions="actionSearch"
-            android:inputType="textCapWords"
-            android:paddingHorizontal="14dp"
-            android:textSize="16sp"
-            app:layout_constraintEnd_toStartOf="@+id/btnSearch"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent" />
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true">
 
-        <!-- Search Button -->
-        <Button
-            android:id="@+id/btnSearch"
-            android:layout_width="wrap_content"
-            android:layout_height="52dp"
-            android:text="Search"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="parent" />
-
-        <!-- Current Location Button -->
-        <Button
-            android:id="@+id/btnLocation"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_marginTop="12dp"
-            android:text="📍 Use Live / Current Location"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/etSearch" />
-
-        <!-- Main Weather Card -->
-        <androidx.cardview.widget.CardView
-            android:id="@+id/cardWeather"
-            android:layout_width="0dp"
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            app:cardBackgroundColor="#FFFFFF"
-            app:cardCornerRadius="16dp"
-            app:cardElevation="4dp"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/btnLocation">
+            android:padding="20dp">
 
-            <LinearLayout
+            <!-- Search Box -->
+            <EditText
+                android:id="@+id/etSearch"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:background="@android:drawable/editbox_background"
+                android:hint="Search Village/City (e.g. Rampur)..."
+                android:imeOptions="actionSearch"
+                android:inputType="textPersonName"
+                android:padding="12dp"
+                app:layout_constraintEnd_toStartOf="@id/btnSearch"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+            <Button
+                android:id="@+id/btnSearch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Search"
+                app:layout_constraintBottom_toBottomOf="@id/etSearch"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toTopOf="@id/etSearch" />
+
+            <!-- Location Details Header -->
+            <TextView
+                android:id="@+id/tvLocationName"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Select a location..."
+                android:textColor="#1A252C"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/etSearch" />
+
+            <TextView
+                android:id="@+id/tvLocationHierarchy"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:text="State / District / Sub-District"
+                android:textColor="#546E7A"
+                android:textSize="14sp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/tvLocationName" />
+
+            <!-- Current Weather Card -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardWeather"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center"
-                android:orientation="vertical"
-                android:padding="24dp">
-
-                <TextView
-                    android:id="@+id/tvLocation"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:gravity="center"
-                    android:text="New Delhi, Delhi"
-                    android:textColor="#1E293B"
-                    android:textSize="22sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvPopulation"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="👥 Population: --"
-                    android:textColor="#64748B"
-                    android:textSize="14sp" />
-
-                <TextView
-                    android:id="@+id/tvTemperature"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="--°C"
-                    android:textColor="#0284C7"
-                    android:textSize="54sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvWeather"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:gravity="center"
-                    android:lineSpacingExtra="6dp"
-                    android:text="Loading weather..."
-                    android:textColor="#475569"
-                    android:textSize="16sp" />
-            </LinearLayout>
-        </androidx.cardview.widget.CardView>
-
-        <!-- Environmental & Sun Details Card -->
-        <androidx.cardview.widget.CardView
-            android:id="@+id/cardDetails"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            app:cardBackgroundColor="#FFFFFF"
-            app:cardCornerRadius="16dp"
-            app:cardElevation="4dp"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/cardWeather">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="20dp">
-
-                <TextView
-                    android:id="@+id/tvRainPrediction"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="🌧️ Rain Prediction: --"
-                    android:textColor="#1E293B"
-                    android:textSize="15sp" />
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginVertical="10dp"
-                    android:background="#E2E8F0" />
-
-                <TextView
-                    android:id="@+id/tvAqi"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="😷 Air Quality (AQI): --"
-                    android:textColor="#1E293B"
-                    android:textSize="15sp" />
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginVertical="10dp"
-                    android:background="#E2E8F0" />
-
-                <TextView
-                    android:id="@+id/tvUvIndex"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="☀️ UV Light Index: --"
-                    android:textColor="#1E293B"
-                    android:textSize="15sp" />
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginVertical="10dp"
-                    android:background="#E2E8F0" />
-
-                <TextView
-                    android:id="@+id/tvSunTimes"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="🌅 Sunrise: --   |   🌇 Sunset: --"
-                    android:textColor="#1E293B"
-                    android:textSize="15sp" />
-            </LinearLayout>
-        </androidx.cardview.widget.CardView>
-
-        <!-- Hourly Forecast Card -->
-        <androidx.cardview.widget.CardView
-            android:id="@+id/cardHourly"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            app:cardBackgroundColor="#FFFFFF"
-            app:cardCornerRadius="16dp"
-            app:cardElevation="4dp"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/cardDetails">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="20dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="🕒 Next 24 Hours"
-                    android:textColor="#1E293B"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <HorizontalScrollView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:scrollbars="none">
-
-                    <LinearLayout
-                        android:id="@+id/layoutHourlyContainer"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal" />
-                </HorizontalScrollView>
-            </LinearLayout>
-        </androidx.cardview.widget.CardView>
-
-        <!-- 7-Day Forecast Card -->
-        <androidx.cardview.widget.CardView
-            android:id="@+id/cardDaily"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            app:cardBackgroundColor="#FFFFFF"
-            app:cardCornerRadius="16dp"
-            app:cardElevation="4dp"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/cardHourly">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="20dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="📅 7-Day Forecast"
-                    android:textColor="#1E293B"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
+                android:layout_marginTop="16dp"
+                app:cardBackgroundColor="#33FFFFFF"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="2dp"
+                app:layout_constraintTop_toBottomOf="@id/tvLocationHierarchy">
 
                 <LinearLayout
-                    android:id="@+id/layoutDailyContainer"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:orientation="vertical" />
-            </LinearLayout>
-        </androidx.cardview.widget.CardView>
+                    android:orientation="vertical"
+                    android:padding="20dp">
 
-        <!-- Loading Indicator -->
-        <ProgressBar
-            android:id="@+id/progressBar"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:visibility="gone"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/cardDaily" />
+                    <TextView
+                        android:id="@+id/tvTemp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="--°C"
+                        android:textColor="#2C3E50"
+                        android:textSize="48sp"
+                        android:textStyle="bold" />
 
-    </androidx.constraintlayout.widget.ConstraintLayout>
-</ScrollView>
+                    <TextView
+                        android:id="@+id/tvCondition"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Condition: --"
+                        android:textColor="#34495E"
+                        android:textSize="18sp" />
+
+                    <TextView
+                        android:id="@+id/tvTempRange"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="High: --°C | Low: --°C"
+                        android:textColor="#7F8C8D"
+                        android:textSize="14sp" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Details Card (Humidity, Wind, Air Quality, etc) -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardDetails"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                app:cardBackgroundColor="#33FFFFFF"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="2dp"
+                app:layout_constraintTop_toBottomOf="@id/cardWeather">
+
+                <GridLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:columnCount="2"
+                    android:padding="16dp"
+                    android:rowCount="4">
+
+                    <TextView
+                        android:id="@+id/tvFeelsLike"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:padding="8dp"
+                        android:text="Feels Like: --°C"
+                        android:textColor="#34495E"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvHumidity"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:padding="8dp"
+                        android:text="Humidity: --%"
+                        android:textColor="#34495E"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvWind"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:padding="8dp"
+                        android:text="Wind: -- km/h"
+                        android:textColor="#34495E"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvRainChance"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:padding="8dp"
+                        android:text="Rain Chance: --%"
+                        android:textColor="#34495E"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvUvIndex"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:padding="8dp"
+                        android:text="UV Index: --"
+                        android:textColor="#34495E"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvAirQuality"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:padding="8dp"
+                        android:text="AQI: --"
+                        android:textColor="#34495E"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvSunrise"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:padding="8dp"
+                        android:text="Sunrise: --"
+                        android:textColor="#34495E"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/tvSunset"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:padding="8dp"
+                        android:text="Sunset: --"
+                        android:textColor="#34495E"
+                        android:textSize="14sp" />
+                </GridLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Hourly Forecast Card -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardHourly"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                app:cardBackgroundColor="#33FFFFFF"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="2dp"
+                app:layout_constraintTop_toBottomOf="@id/cardDetails">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Hourly Forecast"
+                        android:textColor="#2C3E50"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <HorizontalScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp">
+
+                        <LinearLayout
+                            android:id="@+id/layoutHourlyContainer"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal" />
+                    </HorizontalScrollView>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Daily 7-Day Forecast Card -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardDaily"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                app:cardBackgroundColor="#33FFFFFF"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="2dp"
+                app:layout_constraintTop_toBottomOf="@id/cardHourly">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="7-Day Forecast"
+                        android:textColor="#2C3E50"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <LinearLayout
+                        android:id="@+id/layoutDailyContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="vertical" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Population Info -->
+            <TextView
+                android:id="@+id/tvPopulation"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Approx. Village Population: --"
+                android:textColor="#7F8C8D"
+                android:textSize="14sp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/cardDaily" />
+
+            <!-- Progress Indicator -->
+            <ProgressBar
+                android:id="@+id/progressBar"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:visibility="gone"
+                app:layout_bottom_toBottomOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+    </ScrollView>
+</FrameLayout>
