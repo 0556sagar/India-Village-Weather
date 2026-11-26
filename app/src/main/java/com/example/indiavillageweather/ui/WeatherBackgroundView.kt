@@ -1,9 +1,12 @@
 package com.example.indiavillageweather.ui
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.*
 import android.util.AttributeSet
 import android.view.View
+import android.view.animation.LinearInterpolator
+import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -13,225 +16,194 @@ class WeatherBackgroundView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
-    enum class WeatherScene {
-        SUNNY_DAY, CLEAR_NIGHT, CLOUDY, RAINY, THUNDERSTORM, SNOWY, FOGGY
+    private enum class SceneType {
+        CLEAR_DAY, CLEAR_NIGHT, CLOUDY_DAY, CLOUDY_NIGHT, RAIN, THUNDERSTORM, SNOW
     }
 
-    private var currentScene = WeatherScene.SUNNY_DAY
-    private var gradientColors = intArrayOf(Color.parseColor("#2980B9"), Color.parseColor("#6DD5FA"))
-    private val bgPaint = Paint()
-    private val particlePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var currentScene = SceneType.CLEAR_DAY
+    private var animPhase = 0f
+
+    private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val sunPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val sunGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeCap = Paint.Cap.ROUND
+        strokeWidth = 8f
+    }
+    private val cloudPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(160, 220, 240, 255)
+        strokeWidth = 4f
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+    }
 
-    private data class Particle(
-        var x: Float,
-        var y: Float,
-        var speedY: Float,
-        var speedX: Float,
-        var size: Float,
-        var alpha: Int
-    )
+    private data class Particle(var x: Float, var y: Float, val speed: Float, val size: Float)
 
-    private val particles = mutableListOf<Particle>()
-    private var sunAngle = 0f
-    private var lightningAlpha = 0
+    private val raindrops = List(80) {
+        Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.02f + 0.015f, Random.nextFloat() * 25f + 20f)
+    }
+    private val stars = List(60) {
+        Particle(Random.nextFloat(), Random.nextFloat() * 0.6f, Random.nextFloat() * 5f, Random.nextFloat() * 3f + 1.5f)
+    }
+
+    private var cloudX1 = 0.1f
+    private var cloudX2 = 0.6f
+
+    private val animator = ValueAnimator.ofFloat(0f, 360f).apply {
+        duration = 20000L
+        repeatCount = ValueAnimator.INFINITE
+        interpolator = LinearInterpolator()
+        addUpdateListener {
+            animPhase = it.animatedValue as Float
+            updateParticles()
+            invalidate()
+        }
+    }
+
+    init {
+        animator.start()
+    }
 
     fun setWeatherCondition(weatherCode: Int, isDay: Boolean) {
-        val newScene = when (weatherCode) {
-            0, 1 -> if (isDay) WeatherScene.SUNNY_DAY else WeatherScene.CLEAR_NIGHT
-            2, 3 -> WeatherScene.CLOUDY
-            45, 48 -> WeatherScene.FOGGY
-            51, 53, 55, 61, 63, 65, 80, 81, 82 -> WeatherScene.RAINY
-            71, 73, 75, 77, 85, 86 -> WeatherScene.SNOWY
-            95, 96, 99 -> WeatherScene.THUNDERSTORM
-            else -> if (isDay) WeatherScene.SUNNY_DAY else WeatherScene.CLEAR_NIGHT
-        }
-
-        if (newScene != currentScene || particles.isEmpty()) {
-            currentScene = newScene
-            updateThemeColors()
-            initParticles()
+        currentScene = when {
+            weatherCode in 0..1 -> if (isDay) SceneType.CLEAR_DAY else SceneType.CLEAR_NIGHT
+            weatherCode in 2..48 -> if (isDay) SceneType.CLOUDY_DAY else SceneType.CLOUDY_NIGHT
+            weatherCode in 71..77 || weatherCode in 85..86 -> SceneType.SNOW
+            weatherCode in 95..99 -> SceneType.THUNDERSTORM
+            else -> SceneType.RAIN
         }
         invalidate()
     }
 
-    private fun updateThemeColors() {
-        gradientColors = when (currentScene) {
-            WeatherScene.SUNNY_DAY -> intArrayOf(
-                Color.parseColor("#1E88E5"),
-                Color.parseColor("#64B5F6"),
-                Color.parseColor("#B3E5FC")
-            )
-            WeatherScene.CLEAR_NIGHT -> intArrayOf(
-                Color.parseColor("#0B1026"),
-                Color.parseColor("#1B274A"),
-                Color.parseColor("#2C3E6B")
-            )
-            WeatherScene.CLOUDY -> intArrayOf(
-                Color.parseColor("#546E7A"),
-                Color.parseColor("#78909C"),
-                Color.parseColor("#B0BEC5")
-            )
-            WeatherScene.RAINY -> intArrayOf(
-                Color.parseColor("#263238"),
-                Color.parseColor("#37474F"),
-                Color.parseColor("#546E7A")
-            )
-            WeatherScene.THUNDERSTORM -> intArrayOf(
-                Color.parseColor("#141824"),
-                Color.parseColor("#262D40"),
-                Color.parseColor("#3B4259")
-            )
-            WeatherScene.SNOWY -> intArrayOf(
-                Color.parseColor("#607D8B"),
-                Color.parseColor("#90A4AE"),
-                Color.parseColor("#CFD8DC")
-            )
-            WeatherScene.FOGGY -> intArrayOf(
-                Color.parseColor("#757F9A"),
-                Color.parseColor("#D7DDE8")
-            )
+    private fun updateParticles() {
+        cloudX1 += 0.0008f
+        if (cloudX1 > 1.3f) cloudX1 = -0.4f
+
+        cloudX2 += 0.0005f
+        if (cloudX2 > 1.3f) cloudX2 = -0.5f
+
+        if (currentScene == SceneType.RAIN || currentScene == SceneType.THUNDERSTORM || currentScene == SceneType.SNOW) {
+            val speedFactor = if (currentScene == SceneType.SNOW) 0.3f else 1f
+            for (drop in raindrops) {
+                drop.y += drop.speed * speedFactor
+                if (drop.y > 1f) {
+                    drop.y = -0.05f
+                    drop.x = Random.nextFloat()
+                }
+            }
         }
-    }
-
-    private fun initParticles() {
-        particles.clear()
-        val w = if (width > 0) width else 1080
-        val h = if (height > 0) height else 2400
-
-        val count = when (currentScene) {
-            WeatherScene.RAINY, WeatherScene.THUNDERSTORM -> 90
-            WeatherScene.SNOWY -> 60
-            WeatherScene.CLEAR_NIGHT -> 50
-            WeatherScene.CLOUDY, WeatherScene.FOGGY -> 8
-            WeatherScene.SUNNY_DAY -> 0
-        }
-
-        repeat(count) {
-            particles.add(
-                Particle(
-                    x = Random.nextFloat() * w,
-                    y = Random.nextFloat() * h,
-                    speedY = when (currentScene) {
-                        WeatherScene.RAINY, WeatherScene.THUNDERSTORM -> Random.nextFloat() * 18f + 22f
-                        WeatherScene.SNOWY -> Random.nextFloat() * 3f + 2f
-                        else -> 0f
-                    },
-                    speedX = when (currentScene) {
-                        WeatherScene.CLOUDY, WeatherScene.FOGGY -> Random.nextFloat() * 0.8f + 0.3f
-                        WeatherScene.RAINY, WeatherScene.THUNDERSTORM -> -2.5f
-                        else -> 0f
-                    },
-                    size = when (currentScene) {
-                        WeatherScene.RAINY, WeatherScene.THUNDERSTORM -> Random.nextFloat() * 25f + 20f
-                        WeatherScene.SNOWY -> Random.nextFloat() * 6f + 4f
-                        WeatherScene.CLEAR_NIGHT -> Random.nextFloat() * 3f + 1.5f
-                        else -> Random.nextFloat() * 180f + 140f
-                    },
-                    alpha = Random.nextInt(90, 220)
-                )
-            )
-        }
-    }
-
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        initParticles()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val w = width.toFloat()
         val h = height.toFloat()
+        if (w == 0f || h == 0f) return
 
-        bgPaint.shader = LinearGradient(0f, 0f, 0f, h, gradientColors, null, Shader.TileMode.CLAMP)
+        val colors = when (currentScene) {
+            SceneType.CLEAR_DAY -> intArrayOf(Color.parseColor("#1E88E5"), Color.parseColor("#64B5F6"), Color.parseColor("#BBDEFB"))
+            SceneType.CLEAR_NIGHT -> intArrayOf(Color.parseColor("#0B132B"), Color.parseColor("#1C2541"), Color.parseColor("#3A506B"))
+            SceneType.CLOUDY_DAY -> intArrayOf(Color.parseColor("#546E7A"), Color.parseColor("#78909C"), Color.parseColor("#B0BEC5"))
+            SceneType.CLOUDY_NIGHT -> intArrayOf(Color.parseColor("#1A232E"), Color.parseColor("#2C3A47"), Color.parseColor("#485460"))
+            SceneType.RAIN -> intArrayOf(Color.parseColor("#1C2833"), Color.parseColor("#2E4053"), Color.parseColor("#566573"))
+            SceneType.THUNDERSTORM -> intArrayOf(Color.parseColor("#0F1419"), Color.parseColor("#1F2833"), Color.parseColor("#2C3E50"))
+            SceneType.SNOW -> intArrayOf(Color.parseColor("#607D8B"), Color.parseColor("#90A4AE"), Color.parseColor("#CFD8DC"))
+        }
+        bgPaint.shader = LinearGradient(0f, 0f, 0f, h, colors, null, Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, w, h, bgPaint)
 
         when (currentScene) {
-            WeatherScene.SUNNY_DAY -> drawSunGlow(canvas, w)
-            WeatherScene.CLEAR_NIGHT -> drawStars(canvas, w, h)
-            WeatherScene.CLOUDY, WeatherScene.FOGGY -> drawClouds(canvas, w, h)
-            WeatherScene.RAINY -> drawRain(canvas, w, h, withThunder = false)
-            WeatherScene.THUNDERSTORM -> drawRain(canvas, w, h, withThunder = true)
-            WeatherScene.SNOWY -> drawSnow(canvas, w, h)
-        }
-
-        postInvalidateOnAnimation()
-    }
-
-    private fun drawSunGlow(canvas: Canvas, w: Float) {
-        sunAngle = (sunAngle + 0.3f) % 360f
-        val cx = w * 0.82f
-        val cy = height * 0.14f
-        val pulse = (sin(Math.toRadians(sunAngle.toDouble())) * 18f).toFloat()
-
-        sunPaint.color = Color.argb(45, 255, 238, 88)
-        canvas.drawCircle(cx, cy, 240f + pulse, sunPaint)
-
-        sunPaint.color = Color.argb(90, 255, 245, 157)
-        canvas.drawCircle(cx, cy, 140f + pulse * 0.5f, sunPaint)
-
-        sunPaint.color = Color.argb(220, 255, 249, 196)
-        canvas.drawCircle(cx, cy, 75f, sunPaint)
-    }
-
-    private fun drawStars(canvas: Canvas, w: Float, h: Float) {
-        particlePaint.color = Color.WHITE
-        for (p in particles) {
-            p.alpha = (120 + (sin((System.currentTimeMillis() / 300.0) + p.x) * 100)).toInt().coerceIn(40, 255)
-            particlePaint.alpha = p.alpha
-            canvas.drawCircle(p.x, p.y % (h * 0.65f), p.size, particlePaint)
-        }
-    }
-
-    private fun drawClouds(canvas: Canvas, w: Float, h: Float) {
-        particlePaint.color = Color.WHITE
-        for (p in particles) {
-            particlePaint.alpha = if (currentScene == WeatherScene.FOGGY) 55 else 40
-            canvas.drawCircle(p.x, p.y % (h * 0.55f), p.size, particlePaint)
-            canvas.drawCircle(p.x + p.size * 0.7f, (p.y % (h * 0.55f)) + 15f, p.size * 0.8f, particlePaint)
-            p.x += p.speedX
-            if (p.x - p.size > w) p.x = -p.size * 1.5f
-        }
-    }
-
-    private fun drawRain(canvas: Canvas, w: Float, h: Float, withThunder: Boolean) {
-        if (withThunder) {
-            if (lightningAlpha > 0) {
-                canvas.drawColor(Color.argb(lightningAlpha, 255, 255, 255))
-                lightningAlpha = (lightningAlpha - 18).coerceAtLeast(0)
-            } else if (Random.nextInt(180) == 1) {
-                lightningAlpha = 140
+            SceneType.CLEAR_DAY -> drawSun(canvas, w * 0.8f, h * 0.14f)
+            SceneType.CLEAR_NIGHT -> drawNightSky(canvas, w, h)
+            SceneType.CLOUDY_DAY -> {
+                drawSun(canvas, w * 0.78f, h * 0.14f, alpha = 160)
+                drawCloud(canvas, w * cloudX1, h * 0.16f, 1.0f, Color.argb(210, 255, 255, 255))
+                drawCloud(canvas, w * cloudX2, h * 0.25f, 1.3f, Color.argb(170, 240, 245, 250))
             }
+            SceneType.CLOUDY_NIGHT -> {
+                drawNightSky(canvas, w, h)
+                drawCloud(canvas, w * cloudX1, h * 0.18f, 1.1f, Color.argb(140, 120, 135, 150))
+            }
+            SceneType.RAIN -> {
+                drawCloud(canvas, w * cloudX1, h * 0.14f, 1.3f, Color.argb(180, 90, 105, 120))
+                drawRain(canvas, w, h)
+            }
+            SceneType.THUNDERSTORM -> {
+                drawCloud(canvas, w * cloudX1, h * 0.14f, 1.4f, Color.argb(210, 50, 60, 70))
+                drawRain(canvas, w, h)
+                if (Random.nextInt(100) < 3) {
+                    canvas.drawColor(Color.argb(90, 255, 255, 255))
+                }
+            }
+            SceneType.SNOW -> drawSnow(canvas, w, h)
+        }
+    }
+
+    private fun drawSun(canvas: Canvas, cx: Float, cy: Float, alpha: Int = 255) {
+        val pulse = 1f + 0.06f * sin(Math.toRadians((animPhase * 4).toDouble())).toFloat()
+        val radius = 85f * pulse
+
+        sunGlowPaint.shader = RadialGradient(
+            cx, cy, radius * 2.4f,
+            intArrayOf(Color.argb((alpha * 0.6f).toInt(), 255, 238, 88), Color.TRANSPARENT),
+            null, Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(cx, cy, radius * 2.4f, sunGlowPaint)
+
+        rayPaint.color = Color.argb((alpha * 0.65f).toInt(), 255, 245, 157)
+        for (i in 0 until 12) {
+            val angle = Math.toRadians((animPhase + i * 30f).toDouble())
+            val startX = cx + cos(angle).toFloat() * (radius * 1.25f)
+            val startY = cy + sin(angle).toFloat() * (radius * 1.25f)
+            val endX = cx + cos(angle).toFloat() * (radius * 1.75f)
+            val endY = cy + sin(angle).toFloat() * (radius * 1.75f)
+            canvas.drawLine(startX, startY, endX, endY, rayPaint)
         }
 
-        particlePaint.color = Color.parseColor("#B3E5FC")
-        particlePaint.strokeWidth = 3.5f
-        particlePaint.strokeCap = Paint.Cap.ROUND
+        sunPaint.color = Color.argb(alpha, 255, 213, 79)
+        canvas.drawCircle(cx, cy, radius, sunPaint)
+    }
 
-        for (p in particles) {
-            particlePaint.alpha = p.alpha
-            canvas.drawLine(p.x, p.y, p.x + p.speedX, p.y + p.size, particlePaint)
-            p.y += p.speedY
-            p.x += p.speedX
-            if (p.y > h) {
-                p.y = -p.size
-                p.x = Random.nextFloat() * w
-            }
+    private fun drawNightSky(canvas: Canvas, w: Float, h: Float) {
+        for (star in stars) {
+            val twinkle = (120 + 135 * sin(Math.toRadians((animPhase * 3 + star.speed * 50).toDouble()))).toInt()
+            starPaint.alpha = twinkle.coerceIn(40, 255)
+            canvas.drawCircle(star.x * w, star.y * h, star.size, starPaint)
+        }
+        sunPaint.color = Color.parseColor("#FFF9C4")
+        canvas.drawCircle(w * 0.8f, h * 0.14f, 65f, sunPaint)
+    }
+
+    private fun drawCloud(canvas: Canvas, cx: Float, cy: Float, scale: Float, color: Int) {
+        cloudPaint.color = color
+        canvas.drawCircle(cx, cy, 65f * scale, cloudPaint)
+        canvas.drawCircle(cx + 55f * scale, cy - 20f * scale, 80f * scale, cloudPaint)
+        canvas.drawCircle(cx + 120f * scale, cy - 10f * scale, 70f * scale, cloudPaint)
+        canvas.drawCircle(cx + 170f * scale, cy + 10f * scale, 50f * scale, cloudPaint)
+    }
+
+    private fun drawRain(canvas: Canvas, w: Float, h: Float) {
+        for (drop in raindrops) {
+            val x = drop.x * w
+            val y = drop.y * h
+            canvas.drawLine(x, y, x - 8f, y + drop.size, rainPaint)
         }
     }
 
     private fun drawSnow(canvas: Canvas, w: Float, h: Float) {
-        particlePaint.color = Color.WHITE
-        for (p in particles) {
-            particlePaint.alpha = p.alpha
-            val sway = (sin(p.y / 40.0) * 2f).toFloat()
-            canvas.drawCircle(p.x + sway, p.y, p.size, particlePaint)
-            p.y += p.speedY
-            if (p.y > h) {
-                p.y = -p.size
-                p.x = Random.nextFloat() * w
-            }
+        starPaint.alpha = 210
+        for (flake in raindrops) {
+            val x = flake.x * w + sin(flake.y * 15f) * 15f
+            val y = flake.y * h
+            canvas.drawCircle(x, y, 6f, starPaint)
         }
+    }
+
+    override fun onDetachedFromWindow() {
+        animator.cancel()
+        super.onDetachedFromWindow()
     }
 }
