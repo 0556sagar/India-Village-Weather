@@ -168,11 +168,17 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     val currentVersion = getCurrentAppVersion()
-                    if (latestTag.isNotEmpty() && isNewerVersion(latestTag, currentVersion)) {
+                    val currentCode = getCurrentVersionCode()
+                    val prefs = getSharedPreferences("app_update_prefs", Context.MODE_PRIVATE)
+                    val dismissedVersion = prefs.getString("dismissed_version", "")
+
+                    if (latestTag.isNotEmpty() && isNewerVersion(latestTag, currentVersion, currentCode)) {
                         withContext(Dispatchers.Main) {
                             if (isFinishing || isDestroyed) return@withContext
-                            showAppUpdateNotification(latestTag, apkDownloadUrl)
-                            showAppUpdateDialog(latestTag, releaseNotes, apkDownloadUrl)
+                            if (dismissedVersion != latestTag) {
+                                showAppUpdateNotification(latestTag, apkDownloadUrl)
+                                showAppUpdateDialog(latestTag, releaseNotes, apkDownloadUrl)
+                            }
                         }
                     }
                 }
@@ -196,13 +202,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun isNewerVersion(latestTag: String, currentVersion: String): Boolean {
+    private fun getCurrentVersionCode(): Long {
+        return try {
+            val pInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, 0)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                pInfo.versionCode.toLong()
+            }
+        } catch (e: Exception) {
+            1L
+        }
+    }
+
+    private fun isNewerVersion(latestTag: String, currentVersion: String, currentVersionCode: Long): Boolean {
         val latestParts = latestTag.removePrefix("v").removePrefix("V")
             .split(".")
             .mapNotNull { it.filter { ch -> ch.isDigit() }.toIntOrNull() }
         val currentParts = currentVersion.removePrefix("v").removePrefix("V")
             .split(".")
             .mapNotNull { it.filter { ch -> ch.isDigit() }.toIntOrNull() }
+
+        // If tag ends with a patch number matching currentVersionCode (e.g. v1.0.30 and versionCode == 30), already up to date
+        val latestPatch = latestParts.lastOrNull() ?: 0
+        if (latestPatch > 0 && latestPatch.toLong() == currentVersionCode) {
+            return false
+        }
 
         val maxLen = maxOf(latestParts.size, currentParts.size)
         for (i in 0 until maxLen) {
@@ -274,7 +305,12 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "Unable to open browser", Toast.LENGTH_SHORT).show()
                     }
                 }
-                .setNegativeButton("Later", null)
+                .setNegativeButton("Later") { _, _ ->
+                    getSharedPreferences("app_update_prefs", Context.MODE_PRIVATE)
+                        .edit()
+                        .putString("dismissed_version", latestVersion)
+                        .apply()
+                }
                 .show()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -1055,7 +1091,6 @@ class MainActivity : AppCompatActivity() {
                         return@use
                     }
 
-                    // Build Next 24 Hours list starting from current hour
                     val hourlyItems = mutableListOf<HourlyItem>()
                     if (hourly != null) {
                         val hTimes = hourly.optJSONArray("time")
@@ -1085,7 +1120,6 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    // Build 7-Day Forecast list
                     val dailyItems = mutableListOf<DailyItem>()
                     val dTimes = daily.optJSONArray("time")
                     val dMaxArr = daily.optJSONArray("temperature_2m_max")
