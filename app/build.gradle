@@ -3,9 +3,8 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
-def appVersionCode = project.hasProperty('versionCode') ? project.property('versionCode').toInteger() : 29
-def appVersionName = project.hasProperty('versionName') ? project.property('versionName').toString() : "1.0.29"
-
+def appVersionCode = project.hasProperty('versionCode') ? project.property('versionCode').toInteger() : 30
+def appVersionName = project.hasProperty('versionName') ? project.property('versionName').toString() : "1.0.30"
 android {
     namespace 'com.example.indiavillageweather'
     compileSdk 35
