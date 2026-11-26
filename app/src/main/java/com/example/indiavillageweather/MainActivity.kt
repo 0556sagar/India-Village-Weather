@@ -193,7 +193,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (bestLastLocation != null && (System.currentTimeMillis() - bestLastLocation.time) < 2 * 60 * 1000) {
-                fetchWeatherByCoords(bestLastLocation.latitude, bestLastLocation.longitude, null, null)
+                fetchWeatherByCoords(bestLastLocation.latitude, bestLastLocation.longitude, null)
                 return
             }
 
@@ -215,7 +215,7 @@ class MainActivity : AppCompatActivity() {
             override fun onLocationChanged(location: Location) {
                 locationTimeoutJob?.cancel()
                 safeRemoveLocationUpdates(locationManager)
-                fetchWeatherByCoords(location.latitude, location.longitude, null, null)
+                fetchWeatherByCoords(location.latitude, location.longitude, null)
             }
 
             override fun onProviderDisabled(provider: String) {}
@@ -263,7 +263,7 @@ class MainActivity : AppCompatActivity() {
         if (!requestedAnyProvider) {
             activeLocationListener = null
             if (fallbackLocation != null) {
-                fetchWeatherByCoords(fallbackLocation.latitude, fallbackLocation.longitude, null, null)
+                fetchWeatherByCoords(fallbackLocation.latitude, fallbackLocation.longitude, null)
             } else {
                 progressBar.visibility = View.GONE
                 fetchWeatherForVillage(defaultLocation)
@@ -276,7 +276,7 @@ class MainActivity : AppCompatActivity() {
             safeRemoveLocationUpdates(locationManager)
 
             if (fallbackLocation != null) {
-                fetchWeatherByCoords(fallbackLocation.latitude, fallbackLocation.longitude, null, null)
+                fetchWeatherByCoords(fallbackLocation.latitude, fallbackLocation.longitude, null)
             } else {
                 if (!isFinishing && !isDestroyed) {
                     progressBar.visibility = View.GONE
@@ -299,15 +299,145 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private data class PlaceInfo(val name: String, val population: String)
+    private data class PlaceInfo(
+        val name: String,
+        val rawPopulation: String?,
+        val wikidataId: String?,
+        val fallbackRegionName: String?
+    )
 
-    private fun formatPopulation(rawPop: String?): String {
-        if (rawPop.isNullOrBlank()) return "Not available"
-        val digitsOnly = rawPop.replace(",", "").trim().toLongOrNull()
-        return if (digitsOnly != null) {
-            NumberFormat.getNumberInstance(Locale("en", "IN")).format(digitsOnly)
-        } else {
-            rawPop
+    private fun formatIndianNumber(value: Long): String {
+        return NumberFormat.getNumberInstance(Locale("en", "IN")).format(value)
+    }
+
+    private fun parsePopulationNumber(raw: String?): Long? {
+        if (raw.isNullOrBlank()) return null
+        val cleaned = raw.replace(",", "").replace("+", "").trim()
+        return cleaned.toDoubleOrNull()?.toLong()
+    }
+
+    /**
+     * Fetches official population from public sources:
+     * 1. OSM extratags population (if present)
+     * 2. Wikidata EntityData API (Property P1082 - Census population) via Wikidata Q-ID
+     * 3. Wikidata Search API by place name (filtered for Indian villages/towns/cities)
+     * 4. Fallback to district/tehsil population if village has no individual census entry
+     */
+    private fun fetchPublicPopulation(place: PlaceInfo): String {
+        // 1. Direct OSM tag
+        parsePopulationNumber(place.rawPopulation)?.let {
+            return formatIndianNumber(it)
+        }
+
+        // 2. Wikidata Q-ID from Nominatim extratags
+        if (!place.wikidataId.isNullOrBlank()) {
+            fetchWikidataPopulationById(place.wikidataId)?.let {
+                return "${formatIndianNumber(it)} (Census)"
+            }
+        }
+
+        // 3. Search Wikidata by place name (e.g. "Bhanda, Rajasthan")
+        val primaryQuery = place.name.trim()
+        if (primaryQuery.isNotEmpty() && primaryQuery != "Current Location") {
+            searchWikidataPopulationByName(primaryQuery)?.let {
+                return "${formatIndianNumber(it)} (Census)"
+            }
+            val shortPlace = primaryQuery.substringBefore(",").trim()
+            if (shortPlace != primaryQuery) {
+                searchWikidataPopulationByName("$shortPlace India")?.let {
+                    return "${formatIndianNumber(it)} (Census)"
+                }
+            }
+        }
+
+        // 4. Fallback to parent tehsil/district population if village record lacks census count
+        if (!place.fallbackRegionName.isNullOrBlank() && place.fallbackRegionName != primaryQuery) {
+            searchWikidataPopulationByName(place.fallbackRegionName)?.let {
+                return "${formatIndianNumber(it)} (${place.fallbackRegionName.substringBefore(",")} region)"
+            }
+        }
+
+        return "Not recorded in public census"
+    }
+
+    private fun fetchWikidataPopulationById(qId: String): Long? {
+        return try {
+            val cleanId = qId.trim().uppercase(Locale.US)
+            if (!cleanId.startsWith("Q")) return null
+
+            val url = "https://www.wikidata.org/wiki/Special:EntityData/$cleanId.json"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "IndiaVillageWeather/1.0 (com.example.indiavillageweather)")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string()?.trim()
+                if (!response.isSuccessful || body.isNullOrBlank() || !body.startsWith("{")) return null
+
+                val root = JSONObject(body)
+                val entity = root.optJSONObject("entities")?.optJSONObject(cleanId) ?: return null
+                val claims = entity.optJSONObject("claims") ?: return null
+                val p1082 = claims.optJSONArray("P1082") ?: return null
+
+                var latestPop: Long? = null
+                for (i in 0 until p1082.length()) {
+                    val claim = p1082.optJSONObject(i) ?: continue
+                    val amountStr = claim.optJSONObject("mainsnak")
+                        ?.optJSONObject("datavalue")
+                        ?.optJSONObject("value")
+                        ?.optString("amount")
+                    val parsed = parsePopulationNumber(amountStr)
+                    if (parsed != null && parsed > 0) {
+                        latestPop = parsed
+                    }
+                }
+                latestPop
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun searchWikidataPopulationByName(placeQuery: String): Long? {
+        return try {
+            val encoded = URLEncoder.encode(placeQuery, "UTF-8")
+            val url = "https://www.wikidata.org/w/api.php?action=wbsearchentities&search=$encoded&language=en&limit=5&format=json"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "IndiaVillageWeather/1.0 (com.example.indiavillageweather)")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string()?.trim()
+                if (!response.isSuccessful || body.isNullOrBlank() || !body.startsWith("{")) return null
+
+                val results = JSONObject(body).optJSONArray("search") ?: return null
+                for (i in 0 until results.length()) {
+                    val item = results.optJSONObject(i) ?: continue
+                    val desc = item.optString("description", "").lowercase(Locale.US)
+                    val isIndianPlace = desc.contains("india") ||
+                        desc.contains("village") ||
+                        desc.contains("town") ||
+                        desc.contains("city") ||
+                        desc.contains("district") ||
+                        desc.contains("tehsil") ||
+                        desc.contains("block") ||
+                        desc.contains("rajasthan") ||
+                        desc.contains("panchayat")
+
+                    if (isIndianPlace || i == 0) {
+                        val qId = item.optString("id")
+                        val pop = fetchWikidataPopulationById(qId)
+                        if (pop != null && pop > 0) {
+                            return pop
+                        }
+                    }
+                }
+                null
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -318,7 +448,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val encodedQuery = URLEncoder.encode(query, "UTF-8")
-                val geocodeUrl = "https://nominatim.openstreetmap.org/search?format=json&q=$encodedQuery&countrycodes=in&limit=1&extratags=1"
+                val geocodeUrl = "https://nominatim.openstreetmap.org/search?format=json&q=$encodedQuery&countrycodes=in&limit=1&extratags=1&addressdetails=1"
 
                 val request = Request.Builder()
                     .url(geocodeUrl)
@@ -343,8 +473,23 @@ class MainActivity : AppCompatActivity() {
                                 val displayName = firstResult.optString("display_name", query)
                                 val shortName = displayName.split(",").take(2).joinToString(",").trim()
                                 val extraTags = firstResult.optJSONObject("extratags")
-                                val population = formatPopulation(extraTags?.optString("population"))
-                                fetchWeatherByCoordsIO(lat, lon, shortName, population)
+                                val address = firstResult.optJSONObject("address")
+                                val district = address?.optString("state_district")
+                                    ?.ifEmpty { address.optString("county") }
+                                val state = address?.optString("state")
+                                val fallbackRegion = if (!district.isNullOrEmpty() && !state.isNullOrEmpty()) {
+                                    "$district, $state"
+                                } else {
+                                    district
+                                }
+
+                                val placeInfo = PlaceInfo(
+                                    name = shortName,
+                                    rawPopulation = extraTags?.optString("population"),
+                                    wikidataId = extraTags?.optString("wikidata"),
+                                    fallbackRegionName = fallbackRegion
+                                )
+                                fetchWeatherByCoordsIO(lat, lon, placeInfo)
                             } else {
                                 showError("Invalid coordinates returned for: $query")
                             }
@@ -362,23 +507,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun fetchWeatherByCoords(lat: Double, lon: Double, locationTitle: String?, populationText: String?) {
+    private fun fetchWeatherByCoords(lat: Double, lon: Double, presetPlace: PlaceInfo?) {
         if (isFinishing || isDestroyed) return
         progressBar.visibility = View.VISIBLE
 
         lifecycleScope.launch(Dispatchers.IO) {
-            val place = if (locationTitle != null) {
-                PlaceInfo(locationTitle, populationText ?: "Not available")
-            } else {
-                reverseGeocode(lat, lon)
-            }
-            fetchWeatherByCoordsIO(lat, lon, place.name, place.population)
+            val place = presetPlace ?: reverseGeocode(lat, lon)
+            fetchWeatherByCoordsIO(lat, lon, place)
         }
     }
 
     private fun reverseGeocode(lat: Double, lon: Double): PlaceInfo {
         return try {
-            val url = "https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lon&extratags=1"
+            val url = "https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lon&extratags=1&addressdetails=1"
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", "IndiaVillageWeather/1.0 (com.example.indiavillageweather)")
@@ -395,6 +536,8 @@ class MainActivity : AppCompatActivity() {
                         ?.ifEmpty { address.optString("city") }
                         ?.ifEmpty { address.optString("county") }
                     val state = address?.optString("state")
+                    val district = address?.optString("state_district")
+                        ?.ifEmpty { address.optString("county") }
 
                     val resolvedName = if (!villageOrCity.isNullOrEmpty() && !state.isNullOrEmpty()) {
                         "$villageOrCity, $state"
@@ -402,15 +545,25 @@ class MainActivity : AppCompatActivity() {
                         json.optString("display_name", "Current Location").split(",").take(2).joinToString(",")
                     }
 
+                    val fallbackRegion = if (!district.isNullOrEmpty() && !state.isNullOrEmpty()) {
+                        "$district, $state"
+                    } else {
+                        district
+                    }
+
                     val extraTags = json.optJSONObject("extratags")
-                    val pop = formatPopulation(extraTags?.optString("population"))
-                    PlaceInfo(resolvedName, pop)
+                    PlaceInfo(
+                        name = resolvedName,
+                        rawPopulation = extraTags?.optString("population"),
+                        wikidataId = extraTags?.optString("wikidata"),
+                        fallbackRegionName = fallbackRegion
+                    )
                 } else {
-                    PlaceInfo("Current Location", "Not available")
+                    PlaceInfo("Current Location", null, null, null)
                 }
             }
         } catch (e: Exception) {
-            PlaceInfo("Current Location", "Not available")
+            PlaceInfo("Current Location", null, null, null)
         }
     }
 
@@ -481,11 +634,11 @@ class MainActivity : AppCompatActivity() {
     private suspend fun fetchWeatherByCoordsIO(
         lat: Double,
         lon: Double,
-        locationTitle: String,
-        populationText: String
+        place: PlaceInfo
     ) = coroutineScope {
         try {
             val airUvDeferred = async(Dispatchers.IO) { fetchAirQualityAndUv(lat, lon) }
+            val populationDeferred = async(Dispatchers.IO) { fetchPublicPopulation(place) }
 
             val weatherUrl = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
                 "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m" +
@@ -530,6 +683,7 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     val airUv = airUvDeferred.await()
+                    val populationText = populationDeferred.await()
                     val conditionText = getWeatherDescription(weatherCode)
 
                     val aqiDisplay = if (airUv.aqi != null) {
@@ -553,7 +707,7 @@ class MainActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) {
                         if (isFinishing || isDestroyed) return@withContext
                         progressBar.visibility = View.GONE
-                        tvLocation.text = locationTitle
+                        tvLocation.text = place.name
                         tvPopulation.text = "👥 Population: $populationText"
                         tvTemperature.text = "${temp}°C"
                         tvWeather.text = buildString {
@@ -566,7 +720,7 @@ class MainActivity : AppCompatActivity() {
                         tvUvIndex.text = uvDisplay
                         tvSunTimes.text = sunDisplay
 
-                        showWeatherNotification(locationTitle, temp, "$conditionText • Rain: $rainChance%")
+                        showWeatherNotification(place.name, temp, "$conditionText • Rain: $rainChance%")
                     }
                 } else {
                     showError("Failed to load weather data (${response.code})")
