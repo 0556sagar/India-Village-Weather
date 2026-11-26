@@ -9,13 +9,11 @@ def getAutoVersionCode() {
     if (ghRun != null && ghRun.trim().isInteger()) {
         return 30 + ghRun.trim().toInteger()
     }
-
     // 2. Agar -PversionCode pass kiya gaya ho
     def propCode = project.findProperty('versionCode')?.toString()?.trim()
     if (propCode && propCode.isInteger()) {
         return propCode.toInteger()
     }
-
     // 3. Fallback: Git commit count se auto-increment
     try {
         def stdout = new ByteArrayOutputStream()
@@ -29,7 +27,6 @@ def getAutoVersionCode() {
             return 30 + countStr.toInteger()
         }
     } catch (Exception ignored) {}
-
     return 31
 }
 
@@ -51,9 +48,11 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.debug
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
