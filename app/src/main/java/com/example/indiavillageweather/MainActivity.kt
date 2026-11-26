@@ -9,6 +9,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -17,9 +20,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.provider.Settings
+import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
@@ -59,6 +64,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvAqi: TextView
     private lateinit var tvUvIndex: TextView
     private lateinit var tvSunTimes: TextView
+    private lateinit var layoutHourlyContainer: LinearLayout
+    private lateinit var layoutDailyContainer: LinearLayout
     private lateinit var progressBar: ProgressBar
 
     private val defaultLocation = "New Delhi, Delhi"
@@ -104,6 +111,8 @@ class MainActivity : AppCompatActivity() {
         tvAqi = findViewById(R.id.tvAqi)
         tvUvIndex = findViewById(R.id.tvUvIndex)
         tvSunTimes = findViewById(R.id.tvSunTimes)
+        layoutHourlyContainer = findViewById(R.id.layoutHourlyContainer)
+        layoutDailyContainer = findViewById(R.id.layoutDailyContainer)
         progressBar = findViewById(R.id.progressBar)
 
         btnSearch.setOnClickListener {
@@ -120,10 +129,7 @@ class MainActivity : AppCompatActivity() {
             checkLocationPermissionAndFetch(isAutoSync = false)
         }
 
-        // Check GitHub Releases for newer APK version
         checkForAppUpdate()
-
-        // Automatically sync with live location on startup if permission & location services are enabled
         checkLocationPermissionAndFetch(isAutoSync = true)
     }
 
@@ -147,7 +153,6 @@ class MainActivity : AppCompatActivity() {
                     val releaseNotes = json.optString("body", "Bug fixes and performance improvements.").trim()
                     val htmlUrl = json.optString("html_url", githubReleasesFallbackUrl)
 
-                    // Find direct .apk asset URL if attached to the GitHub release
                     var apkDownloadUrl = htmlUrl
                     val assets = json.optJSONArray("assets")
                     if (assets != null) {
@@ -818,6 +823,32 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun formatHourLabel(isoDateTime: String?): String {
+        if (isoDateTime.isNullOrBlank()) return "--"
+        return try {
+            val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.US)
+            val formatter = SimpleDateFormat("h a", Locale.US)
+            val date = parser.parse(isoDateTime)
+            if (date != null) formatter.format(date) else isoDateTime.substringAfter("T")
+        } catch (e: Exception) {
+            isoDateTime.substringAfter("T", "--")
+        }
+    }
+
+    private fun formatDayLabel(isoDate: String?, index: Int): String {
+        if (index == 0) return "Today"
+        if (index == 1) return "Tomorrow"
+        if (isoDate.isNullOrBlank()) return "--"
+        return try {
+            val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val formatter = SimpleDateFormat("EEE, d MMM", Locale.US)
+            val date = parser.parse(isoDate)
+            if (date != null) formatter.format(date) else isoDate
+        } catch (e: Exception) {
+            isoDate
+        }
+    }
+
     private fun getAqiLabel(aqi: Int): String {
         return when {
             aqi <= 50 -> "Good"
@@ -839,6 +870,137 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private data class HourlyItem(
+        val timeLabel: String,
+        val emoji: String,
+        val tempC: Int,
+        val rainChance: Int
+    )
+
+    private data class DailyItem(
+        val dayLabel: String,
+        val emoji: String,
+        val rainChance: Int,
+        val minTemp: Int,
+        val maxTemp: Int
+    )
+
+    private fun renderHourlyForecast(items: List<HourlyItem>) {
+        layoutHourlyContainer.removeAllViews()
+        val density = resources.displayMetrics.density
+        val padH = (12 * density).toInt()
+        val padV = (10 * density).toInt()
+        val marginEnd = (8 * density).toInt()
+
+        for (item in items) {
+            val chip = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(padH, padV, padH, padV)
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#F8FAFC"))
+                    cornerRadius = 12 * density
+                    setStroke((1 * density).toInt(), Color.parseColor("#E2E8F0"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, 0, marginEnd, 0)
+                }
+            }
+
+            val tvTime = TextView(this).apply {
+                text = item.timeLabel
+                textSize = 12f
+                setTextColor(Color.parseColor("#64748B"))
+            }
+
+            val tvIcon = TextView(this).apply {
+                text = item.emoji
+                textSize = 20f
+                setPadding(0, (4 * density).toInt(), 0, (4 * density).toInt())
+            }
+
+            val tvTemp = TextView(this).apply {
+                text = "${item.tempC}°"
+                textSize = 15f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor("#0F172A"))
+            }
+
+            val tvRain = TextView(this).apply {
+                text = "💧${item.rainChance}%"
+                textSize = 11f
+                setTextColor(Color.parseColor("#0284C7"))
+            }
+
+            chip.addView(tvTime)
+            chip.addView(tvIcon)
+            chip.addView(tvTemp)
+            chip.addView(tvRain)
+            layoutHourlyContainer.addView(chip)
+        }
+    }
+
+    private fun renderDailyForecast(items: List<DailyItem>) {
+        layoutDailyContainer.removeAllViews()
+        val density = resources.displayMetrics.density
+
+        items.forEachIndexed { idx, item ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, (8 * density).toInt(), 0, (8 * density).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+
+            val tvDay = TextView(this).apply {
+                text = item.dayLabel
+                textSize = 14f
+                setTypeface(null, if (idx == 0) Typeface.BOLD else Typeface.NORMAL)
+                setTextColor(Color.parseColor("#1E293B"))
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.4f)
+            }
+
+            val tvIconRain = TextView(this).apply {
+                text = "${item.emoji}  💧${item.rainChance}%"
+                textSize = 13f
+                setTextColor(Color.parseColor("#0284C7"))
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.1f)
+            }
+
+            val tvRange = TextView(this).apply {
+                text = "${item.minTemp}° / ${item.maxTemp}°"
+                textSize = 14f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor("#0F172A"))
+                gravity = Gravity.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+            }
+
+            row.addView(tvDay)
+            row.addView(tvIconRain)
+            row.addView(tvRange)
+            layoutDailyContainer.addView(row)
+
+            if (idx < items.size - 1) {
+                val divider = View(this).apply {
+                    setBackgroundColor(Color.parseColor("#E2E8F0"))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        (1 * density).toInt()
+                    )
+                }
+                layoutDailyContainer.addView(divider)
+            }
+        }
+    }
+
     private suspend fun fetchWeatherByCoordsIO(
         lat: Double,
         lon: Double,
@@ -850,8 +1012,9 @@ class MainActivity : AppCompatActivity() {
 
             val weatherUrl = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
                 "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m" +
-                "&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,precipitation_probability_max,uv_index_max" +
-                "&timezone=auto&forecast_days=1"
+                "&hourly=temperature_2m,precipitation_probability,weather_code" +
+                "&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,precipitation_probability_max,uv_index_max,weather_code" +
+                "&timezone=auto&forecast_days=7"
 
             val request = Request.Builder().url(weatherUrl).build()
 
@@ -861,12 +1024,14 @@ class MainActivity : AppCompatActivity() {
                     val json = JSONObject(responseBody)
                     val current = json.optJSONObject("current")
                     val daily = json.optJSONObject("daily")
+                    val hourly = json.optJSONObject("hourly")
 
                     if (current == null || daily == null) {
                         showError("Incomplete weather data received")
                         return@use
                     }
 
+                    val currentTimeStr = current.optString("time", "")
                     val temp = current.optDouble("temperature_2m", Double.NaN)
                     val feelsLike = current.optDouble("apparent_temperature", temp)
                     val humidity = current.optInt("relative_humidity_2m", 0)
@@ -888,6 +1053,55 @@ class MainActivity : AppCompatActivity() {
                     if (temp.isNaN()) {
                         showError("Temperature unavailable")
                         return@use
+                    }
+
+                    // Build Next 24 Hours list starting from current hour
+                    val hourlyItems = mutableListOf<HourlyItem>()
+                    if (hourly != null) {
+                        val hTimes = hourly.optJSONArray("time")
+                        val hTemps = hourly.optJSONArray("temperature_2m")
+                        val hRain = hourly.optJSONArray("precipitation_probability")
+                        val hCodes = hourly.optJSONArray("weather_code")
+
+                        if (hTimes != null && hTemps != null) {
+                            var startIdx = 0
+                            if (currentTimeStr.length >= 13) {
+                                val currentHourPrefix = currentTimeStr.substring(0, 13)
+                                for (i in 0 until hTimes.length()) {
+                                    if (hTimes.optString(i).startsWith(currentHourPrefix)) {
+                                        startIdx = i
+                                        break
+                                    }
+                                }
+                            }
+                            val endIdx = minOf(startIdx + 24, hTimes.length())
+                            for (i in startIdx until endIdx) {
+                                val label = if (i == startIdx) "Now" else formatHourLabel(hTimes.optString(i))
+                                val t = Math.round(hTemps.optDouble(i, temp)).toInt()
+                                val r = hRain?.optInt(i, 0) ?: 0
+                                val c = hCodes?.optInt(i, weatherCode) ?: weatherCode
+                                hourlyItems.add(HourlyItem(label, getWeatherEmoji(c), t, r))
+                            }
+                        }
+                    }
+
+                    // Build 7-Day Forecast list
+                    val dailyItems = mutableListOf<DailyItem>()
+                    val dTimes = daily.optJSONArray("time")
+                    val dMaxArr = daily.optJSONArray("temperature_2m_max")
+                    val dMinArr = daily.optJSONArray("temperature_2m_min")
+                    val dRainArr = daily.optJSONArray("precipitation_probability_max")
+                    val dCodeArr = daily.optJSONArray("weather_code")
+                    if (dTimes != null && dMaxArr != null && dMinArr != null) {
+                        val count = minOf(7, dTimes.length())
+                        for (i in 0 until count) {
+                            val dayLabel = formatDayLabel(dTimes.optString(i), i)
+                            val maxT = Math.round(dMaxArr.optDouble(i, temp)).toInt()
+                            val minT = Math.round(dMinArr.optDouble(i, temp)).toInt()
+                            val rainP = dRainArr?.optInt(i, 0) ?: 0
+                            val wCode = dCodeArr?.optInt(i, weatherCode) ?: weatherCode
+                            dailyItems.add(DailyItem(dayLabel, getWeatherEmoji(wCode), rainP, minT, maxT))
+                        }
                     }
 
                     val airUv = airUvDeferred.await()
@@ -927,6 +1141,9 @@ class MainActivity : AppCompatActivity() {
                         tvAqi.text = aqiDisplay
                         tvUvIndex.text = uvDisplay
                         tvSunTimes.text = sunDisplay
+
+                        renderHourlyForecast(hourlyItems)
+                        renderDailyForecast(dailyItems)
 
                         showWeatherNotification(place.name, temp, "$conditionText • Rain: $rainChance%")
                     }
@@ -979,6 +1196,21 @@ class MainActivity : AppCompatActivity() {
             if (isFinishing || isDestroyed) return@withContext
             progressBar.visibility = View.GONE
             Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun getWeatherEmoji(code: Int): String {
+        return when (code) {
+            0 -> "☀️"
+            1, 2, 3 -> "⛅"
+            45, 48 -> "🌫️"
+            51, 53, 55 -> "🌦️"
+            61, 63, 65 -> "🌧️"
+            66, 67 -> "🌨️"
+            71, 73, 75 -> "❄️"
+            80, 81, 82 -> "🌦️"
+            95, 96, 99 -> "⛈️"
+            else -> "🌤️"
         }
     }
 
