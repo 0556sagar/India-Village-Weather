@@ -3,8 +3,39 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
-def appVersionCode = project.hasProperty('versionCode') ? project.property('versionCode').toInteger() : 30
-def appVersionName = project.hasProperty('versionName') ? project.property('versionName').toString() : "1.0.30"
+def getAutoVersionCode() {
+    // 1. Agar GitHub Actions se run ho raha hai toh GITHUB_RUN_NUMBER automatically le lega
+    def ghRun = System.getenv("GITHUB_RUN_NUMBER")
+    if (ghRun != null && ghRun.trim().isInteger()) {
+        return 30 + ghRun.trim().toInteger()
+    }
+
+    // 2. Agar -PversionCode pass kiya gaya ho
+    def propCode = project.findProperty('versionCode')?.toString()?.trim()
+    if (propCode && propCode.isInteger()) {
+        return propCode.toInteger()
+    }
+
+    // 3. Fallback: Git commit count se auto-increment
+    try {
+        def stdout = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'rev-list', '--count', 'HEAD'
+            standardOutput = stdout
+            ignoreExitValue = true
+        }
+        def countStr = stdout.toString().trim()
+        if (countStr.isInteger()) {
+            return 30 + countStr.toInteger()
+        }
+    } catch (Exception ignored) {}
+
+    return 31
+}
+
+def appVersionCode = getAutoVersionCode()
+def appVersionName = "1.0.${appVersionCode}"
+
 android {
     namespace 'com.example.indiavillageweather'
     compileSdk 35
