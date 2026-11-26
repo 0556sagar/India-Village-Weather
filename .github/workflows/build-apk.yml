@@ -30,13 +30,35 @@ jobs:
           gradle-version: '8.5'
 
       - name: Grant execute permission for gradlew
-        run: gradle wrapper --gradle-version 8.5 && chmod +x gradlew
+        run: chmod +x gradlew
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
+
+      - name: Set Auto Version
+        id: version
+        run: |
+          NEW_CODE=$((30 + ${{ github.run_number }}))
+          NEW_NAME="1.0.${NEW_CODE}"
+          echo "code=$NEW_CODE" >> $GITHUB_OUTPUT
+          echo "name=$NEW_NAME" >> $GITHUB_OUTPUT
+          echo "tag=v$NEW_NAME" >> $GITHUB_OUTPUT
+
+      - name: Rename APK with Version
+        run: |
+          cp app/build/outputs/apk/release/app-release-unsigned.apk India-Village-Weather-${{ steps.version.outputs.tag }}.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Release ${{ steps.version.outputs.tag }}
+          files: India-Village-Weather-${{ steps.version.outputs.tag }}.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
