@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.IndiaVillageWeather" parent="Theme.AppCompat.Light.DarkActionBar">
+    <style name="Theme.IndiaVillageWeather" parent="Theme.AppCompat.NoActionBar">
         <item name="colorPrimary">#1E88E5</item>
-        <item name="colorPrimaryDark">#1565C0</item>
-        <item name="colorAccent">#00ACC1</item>
+        <item name="colorPrimaryDark">#0B1623</item>
+        <item name="colorAccent">#FFB300</item>
+        <item name="android:windowBackground">#0F2740</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
     </style>
 </resources>
