@@ -353,8 +353,8 @@
             <!-- Weather cat: perched on the top edge of the tiles (declared late so it draws on top) -->
             <com.example.indiavillageweather.ui.CatView
                 android:id="@+id/catView"
-                android:layout_width="230dp"
-                android:layout_height="150dp"
+                android:layout_width="260dp"
+                android:layout_height="173dp"
                 android:translationY="8dp"
                 app:layout_constraintBottom_toTopOf="@id/gridDetails"
                 app:layout_constraintEnd_toEndOf="parent" />
