@@ -460,6 +460,7 @@ class MainActivity : AppCompatActivity() {
         // sky + cat react to the same data
         weatherBackgroundView.setWeather(u.code, u.isDay, u.twilight, u.wind.toFloat())
         catView.setWeather(u.code, u.isDay, u.temp)
+        catView.setContext(u.temp, u.feels, u.humidity, u.wind, u.rainToday, u.uv, u.aqi)
         val aqiNow = u.aqi
         if (aqiNow != null && aqiNow >= 151) {
             catView.say("Hawa kharab hai, mask lagao \uD83D\uDE37", 4200L)
